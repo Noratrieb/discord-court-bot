@@ -1,185 +1,230 @@
-use serenity::{async_trait, framework::standard::Command, model::prelude::*, prelude::*};
-use tracing::debug;
+use color_eyre::eyre::{eyre, ContextCompat};
+use serenity::{
+    async_trait,
+    builder::CreateApplicationCommands,
+    model::{
+        interactions::application_command::ApplicationCommandOptionType,
+        prelude::{application_command::*, *},
+    },
+    prelude::*,
+};
+use tracing::{debug, error, info};
+
+use crate::{
+    lawsuit::{Lawsuit, LawsuitState},
+    WrapErr,
+};
+
+fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
+    commands.create_application_command(|command| {
+        command
+            .name("lawsuit")
+            .description("Einen Gerichtsprozess starten")
+            .create_option(|option| {
+                option
+                    .name("create")
+                    .description("Einen neuen Gerichtsprozess anfangen")
+                    .kind(ApplicationCommandOptionType::SubCommand)
+                    .create_sub_option(|option| {
+                        option
+                            .name("plaintiff")
+                            .description("Der Kläger")
+                            .kind(ApplicationCommandOptionType::User)
+                            .required(true)
+                    })
+                    .create_sub_option(|option| {
+                        option
+                            .name("accused")
+                            .description("Der Angeklagte")
+                            .kind(ApplicationCommandOptionType::User)
+                            .required(true)
+                    })
+                    .create_sub_option(|option| {
+                        option
+                            .name("reason")
+                            .description("Der Grund für die Klage")
+                            .kind(ApplicationCommandOptionType::String)
+                            .required(true)
+                    })
+                    .create_sub_option(|option| {
+                        option
+                            .name("plaintiff_lawyer")
+                            .description("Der Anwalt des Klägers")
+                            .kind(ApplicationCommandOptionType::User)
+                            .required(false)
+                    })
+                    .create_sub_option(|option| {
+                        option
+                            .name("accused_lawyer")
+                            .description("Der Anwalt des Angeklagten")
+                            .kind(ApplicationCommandOptionType::User)
+                            .required(false)
+                    })
+            })
+    })
+}
 
 pub struct Handler {
     pub dev_guild_id: Option<GuildId>,
+    pub set_global_commands: bool,
+    pub mongo: Mongo,
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+        info!(name = %ready.user.name, "Bot is connected!");
 
         if let Some(guild_id) = self.dev_guild_id {
-            let commands = GuildId::set_application_commands(&guild_id, &ctx.http, |commands| {
-                commands
-                    .create_application_command(|command| {
-                        command.name("ping").description("A ping command")
-                    })
-                    .create_application_command(|command| {
-                        command.name("id").description("Get a user id").create_option(|option| {
-                            option
-                                .name("id")
-                                .description("The user to lookup")
-                                .kind(CommandOptionType::User)
-                                .required(true)
-                        })
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("welcome")
-                            .name_localized("de", "begrüßen")
-                            .description("Welcome a user")
-                            .description_localized("de", "Einen Nutzer begrüßen")
-                            .create_option(|option| {
-                                option
-                                    .name("user")
-                                    .name_localized("de", "nutzer")
-                                    .description("The user to welcome")
-                                    .description_localized("de", "Der zu begrüßende Nutzer")
-                                    .kind(CommandOptionType::User)
-                                    .required(true)
-                            })
-                            .create_option(|option| {
-                                option
-                                    .name("message")
-                                    .name_localized("de", "nachricht")
-                                    .description("The message to send")
-                                    .description_localized("de", "Die versendete Nachricht")
-                                    .kind(CommandOptionType::String)
-                                    .required(true)
-                                    .add_string_choice_localized(
-                                        "Welcome to our cool server! Ask me if you need help",
-                                        "pizza",
-                                        [("de", "Willkommen auf unserem coolen Server! Frag mich, falls du Hilfe brauchst")]
-                                    )
-                                    .add_string_choice_localized(
-                                        "Hey, do you want a coffee?",
-                                        "coffee",
-                                        [("de", "Hey, willst du einen Kaffee?")],
-                                    )
-                                    .add_string_choice_localized(
-                                        "Welcome to the club, you're now a good person. Well, I hope.",
-                                        "club",
-                                        [("de", "Willkommen im Club, du bist jetzt ein guter Mensch. Naja, hoffentlich.")],
-                                    )
-                                    .add_string_choice_localized(
-                                        "I hope that you brought a controller to play together!",
-                                        "game",
-                                        [("de", "Ich hoffe du hast einen Controller zum Spielen mitgebracht!")],
-                                    )
-                            })
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("numberinput")
-                            .description("Test command for number input")
-                            .create_option(|option| {
-                                option
-                                    .name("int")
-                                    .description("An integer from 5 to 10")
-                                    .kind(CommandOptionType::Integer)
-                                    .min_int_value(5)
-                                    .max_int_value(10)
-                                    .required(true)
-                            })
-                            .create_option(|option| {
-                                option
-                                    .name("number")
-                                    .description("A float from -3.3 to 234.5")
-                                    .kind(CommandOptionType::Number)
-                                    .min_number_value(-3.3)
-                                    .max_number_value(234.5)
-                                    .required(true)
-                            })
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("attachmentinput")
-                            .description("Test command for attachment input")
-                            .create_option(|option| {
-                                option
-                                    .name("attachment")
-                                    .description("A file")
-                                    .kind(CommandOptionType::Attachment)
-                                    .required(true)
-                            })
-                    })
-            })
-                .await;
+            let guild_commands =
+                GuildId::set_application_commands(&guild_id, &ctx.http, slash_commands).await;
 
-            debug!(?commands, "I now have the following guild slash commands",);
+            match guild_commands {
+                Ok(_) => info!("Installed guild slash commands"),
+                Err(error) => error!(?error, "Failed to create global commands"),
+            }
         }
 
-        /*
-        let guild_command = Command::create_global_application_command(&ctx.http, |command| {
-            command
-                .name("wonderful_command")
-                .description("An amazing command")
-        })
-        .await;
-        */
-
-        println!(
-            "I created the following global slash command: {:#?}",
-            guild_command
-        );
+        if self.set_global_commands {
+            todo!()
+            // let guild_commands =
+            //     ApplicationCommand::create_global_application_command(&ctx.http, slash_commands)
+            //         .await;
+            // match guild_commands {
+            //     Ok(commands) => info!(?commands, "Created global commands"),
+            //     Err(error) => error!(?error, "Failed to create global commands"),
+            // }
+        }
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
-            println!("Received command interaction: {:#?}", command);
+            debug!(name = %command.data.name, "Received command interaction");
 
-            let content = match command.data.name.as_str() {
-                "ping" => "Hey, I'm alive!".to_string(),
-                "id" => {
-                    let options = command
-                        .data
-                        .options
-                        .get(0)
-                        .expect("Expected user option")
-                        .resolved
-                        .as_ref()
-                        .expect("Expected user object");
-
-                    if let CommandDataOptionValue::User(user, _member) = options {
-                        format!("{}'s id is {}", user.tag(), user.id)
+            let result = match command.data.name.as_str() {
+                "lawsuit" => {
+                    let result = lawsuit_command_handler(&command).await;
+                    if let Err(err) = result {
+                        error!(?err, "Error processing response");
+                        command
+                            .create_interaction_response(&ctx.http, |response| {
+                                response
+                                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                                    .interaction_response_data(|message| {
+                                        message.content("An error occurred")
+                                    })
+                            })
+                            .await
+                            .wrap_err("error response")
                     } else {
-                        "Please provide a valid user".to_string()
+                        Ok(())
                     }
                 }
-                "attachmentinput" => {
-                    let options = command
-                        .data
-                        .options
-                        .get(0)
-                        .expect("Expected attachment option")
-                        .resolved
-                        .as_ref()
-                        .expect("Expected attachment object");
-
-                    if let CommandDataOptionValue::Attachment(attachment) = options {
-                        format!(
-                            "Attachment name: {}, attachment size: {}",
-                            attachment.filename, attachment.size
-                        )
-                    } else {
-                        "Please provide a valid attachment".to_string()
-                    }
-                }
-                _ => "not implemented :(".to_string(),
+                _ => command
+                    .create_interaction_response(&ctx.http, |response| {
+                        response
+                            .kind(InteractionResponseType::ChannelMessageWithSource)
+                            .interaction_response_data(|message| {
+                                message.content("not implemented :(")
+                            })
+                    })
+                    .await
+                    .wrap_err("not implemented response"),
             };
-
-            if let Err(why) = command
-                .create_interaction_response(&ctx.http, |response| {
-                    response
-                        .kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| message.content(content))
-                })
-                .await
-            {
-                println!("Cannot respond to slash command: {}", why);
+            if let Err(err) = result {
+                error!(?err, "Error sending response");
             }
         }
+    }
+}
+
+async fn lawsuit_command_handler(
+    command: &ApplicationCommandInteraction,
+) -> color_eyre::Result<()> {
+    let options = &command.data.options;
+    let subcomamnd = options.get(0).wrap_err("needs subcommand")?;
+
+    match subcomamnd.name.as_str() {
+        "create" => {
+            let options = &subcomamnd.options;
+            let plaintiff = get_user(options.get(0)).wrap_err("plaintiff")?;
+            let accused = get_user(options.get(1)).wrap_err("accused")?;
+            let reason = get_string(options.get(2)).wrap_err("reason")?;
+            let plaintiff_layer = get_user_optional(options.get(3)).wrap_err("plaintiff_layer")?;
+            let accused_layer = get_user_optional(options.get(4)).wrap_err("accused_layer")?;
+
+            let lawsuit = Lawsuit {
+                plaintiff: plaintiff.0.id,
+                accused: accused.0.id,
+                plaintiff_layer: plaintiff_layer.map(|l| l.0.id),
+                accused_layer: accused_layer.map(|l| l.0.id),
+                reason: reason.to_owned(),
+                state: LawsuitState::Initial,
+                court_room: Default::default(),
+            };
+
+            info!(?lawsuit, "Created lawsuit");
+
+            Ok(())
+        }
+        _ => Err(eyre!("Unknown subcommand")),
+    }
+}
+
+fn get_user(
+    option: Option<&ApplicationCommandInteractionDataOption>,
+) -> color_eyre::Result<(&User, &Option<PartialMember>)> {
+    let option = get_user_optional(option);
+    match option {
+        Ok(Some(t)) => Ok(t),
+        Ok(None) => Err(eyre!("Expected value!")),
+        Err(err) => Err(err),
+    }
+}
+
+fn get_user_optional(
+    option: Option<&ApplicationCommandInteractionDataOption>,
+) -> color_eyre::Result<Option<(&User, &Option<PartialMember>)>> {
+    if let Some(option) = option {
+        if let Some(command) = option.resolved.as_ref() {
+            if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
+                Ok(Some((user, member)))
+            } else {
+                Err(eyre!("Expected user!"))
+            }
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
+    }
+}
+
+fn get_string(
+    option: Option<&ApplicationCommandInteractionDataOption>,
+) -> color_eyre::Result<&str> {
+    let option = get_string_optional(option);
+    match option {
+        Ok(Some(t)) => Ok(t),
+        Ok(None) => Err(eyre!("Expected value!")),
+        Err(err) => Err(err),
+    }
+}
+
+fn get_string_optional(
+    option: Option<&ApplicationCommandInteractionDataOption>,
+) -> color_eyre::Result<Option<&str>> {
+    if let Some(option) = option {
+        if let Some(command) = option.resolved.as_ref() {
+            if let ApplicationCommandInteractionDataOptionValue::String(str) = command {
+                Ok(Some(str))
+            } else {
+                Err(eyre!("Expected string!"))
+            }
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
     }
 }
