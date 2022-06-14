@@ -204,6 +204,7 @@ dependencies = [
  "mongodb",
  "nougat",
  "serde",
+ "serde_json",
  "serenity",
  "tokio",
  "tracing",

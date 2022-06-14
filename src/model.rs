@@ -21,6 +21,7 @@ pub struct State {
 pub struct CourtRoom {
     pub channel_id: String,
     pub ongoing_lawsuit: bool,
+    pub role_id: String,
 }
 
 pub struct Mongo {
@@ -94,6 +95,19 @@ impl Mongo {
         )
         .await
         .wrap_err("update court category")?;
+        Ok(())
+    }
+
+    pub async fn add_court_room(&self, guild_id: &str, room: CourtRoom) -> Result<()> {
+        let _ = self.find_or_insert_state(guild_id).await?;
+        let coll = self.state_coll();
+        coll.update_one(
+            doc! {"guild_id": &guild_id  },
+            doc! {"$push": { "court_rooms": &serde_json::to_string(&room).unwrap() }},
+            None,
+        )
+        .await
+        .wrap_err("push court room")?;
         Ok(())
     }
 

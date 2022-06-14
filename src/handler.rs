@@ -83,7 +83,7 @@ pub struct Handler {
     pub mongo: Mongo,
 }
 
-enum Response {
+pub enum Response {
     Simple(String),
 }
 
@@ -176,7 +176,7 @@ async fn lawsuit_command_handler(
     let subcommand = options.get(0).wrap_err("needs subcommand")?;
 
     let options = &subcommand.options;
-    let guild_id = command.guild_id.wrap_err("guild_id not found")?.to_string();
+    let guild_id = command.guild_id.wrap_err("guild_id not found")?;
 
     match subcommand.name.as_str() {
         "create" => {
@@ -198,14 +198,14 @@ async fn lawsuit_command_handler(
                 court_room: None,
             };
 
-            lawsuit
-                .initialize(&guild_id, mongo_client)
+            let response = lawsuit
+                .initialize(&ctx.http, guild_id, mongo_client)
                 .await
                 .wrap_err("initialize lawsuit")?;
 
             info!(?lawsuit, "Created lawsuit");
 
-            Ok(Response::Simple("hani erstellt, keis problem".to_owned()))
+            Ok(response)
         }
         "set_category" => {
             let channel = ChannelOption::get(options.get(0))?;
@@ -219,7 +219,7 @@ async fn lawsuit_command_handler(
                 Some(category) => {
                     let id = category.id;
                     mongo_client
-                        .set_court_category(&guild_id, &id.to_string())
+                        .set_court_category(&guild_id.to_string(), &id.to_string())
                         .await?;
                 }
                 None => return Ok(Response::Simple("Das ist keine Kategorie!".to_owned())),
