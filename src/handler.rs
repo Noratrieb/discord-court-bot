@@ -2,7 +2,6 @@ use color_eyre::eyre::{eyre, ContextCompat};
 use serenity::{
     async_trait,
     builder::CreateApplicationCommands,
-    http::Http,
     model::{
         interactions::application_command::ApplicationCommandOptionType,
         prelude::{application_command::*, *},
@@ -84,6 +83,10 @@ pub struct Handler {
     pub mongo: Mongo,
 }
 
+enum Response {
+    Simple(String),
+}
+
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
@@ -113,56 +116,70 @@ impl EventHandler for Handler {
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
-            debug!(name = %command.data.name, "Received command interaction");
-
-            let result = match command.data.name.as_str() {
-                "lawsuit" => {
-                    let result = lawsuit_command_handler(&command, &ctx.http, &self.mongo).await;
-                    if let Err(err) = result {
-                        error!(?err, "Error processing response");
-                        command
-                            .create_interaction_response(&ctx.http, |response| {
-                                response
-                                    .kind(InteractionResponseType::ChannelMessageWithSource)
-                                    .interaction_response_data(|message| {
-                                        message.content("An error occurred")
-                                    })
-                            })
-                            .await
-                            .wrap_err("error response")
-                    } else {
-                        Ok(())
-                    }
-                }
-                _ => command
-                    .create_interaction_response(&ctx.http, |response| {
-                        response
-                            .kind(InteractionResponseType::ChannelMessageWithSource)
-                            .interaction_response_data(|message| {
-                                message.content("not implemented :(")
-                            })
-                    })
-                    .await
-                    .wrap_err("not implemented response"),
-            };
-            if let Err(err) = result {
-                error!(?err, "Error sending response");
+            if let Err(err) = self.handle_interaction(ctx, command).await {
+                error!(?err, "An error occurred");
             }
         }
+    }
+}
+impl Handler {
+    async fn handle_interaction(
+        &self,
+        ctx: Context,
+        command: ApplicationCommandInteraction,
+    ) -> color_eyre::Result<()> {
+        debug!(name = %command.data.name, "Received command interaction");
+
+        let response = match command.data.name.as_str() {
+            "lawsuit" => lawsuit_command_handler(&command, &ctx, &self.mongo).await,
+            _ => Ok(Response::Simple("not implemented :(".to_owned())),
+        };
+
+        match response {
+            Ok(response) => self.send_response(ctx, command, response).await,
+            Err(err) => {
+                error!(?err, "Error during command execution");
+                self.send_response(
+                    ctx,
+                    command,
+                    Response::Simple("An internal error occurred".to_owned()),
+                )
+                .await
+            }
+        }
+    }
+
+    async fn send_response(
+        &self,
+        ctx: Context,
+        command: ApplicationCommandInteraction,
+        response: Response,
+    ) -> color_eyre::Result<()> {
+        command
+            .create_interaction_response(&ctx.http, |res| match response {
+                Response::Simple(content) => res
+                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                    .interaction_response_data(|message| message.content(content)),
+            })
+            .await
+            .wrap_err("sending response")?;
+        Ok(())
     }
 }
 
 async fn lawsuit_command_handler(
     command: &ApplicationCommandInteraction,
-    http: impl AsRef<Http>,
+    ctx: &Context,
     mongo_client: &Mongo,
-) -> color_eyre::Result<()> {
+) -> color_eyre::Result<Response> {
     let options = &command.data.options;
-    let subcomamnd = options.get(0).wrap_err("needs subcommand")?;
+    let subcommand = options.get(0).wrap_err("needs subcommand")?;
 
-    match subcomamnd.name.as_str() {
+    let options = &subcommand.options;
+    let guild_id = command.guild_id.wrap_err("guild_id not found")?.to_string();
+
+    match subcommand.name.as_str() {
         "create" => {
-            let options = &subcomamnd.options;
             let plaintiff = UserOption::get(options.get(0)).wrap_err("plaintiff")?;
             let accused = UserOption::get(options.get(1)).wrap_err("accused")?;
             let reason = StringOption::get(options.get(2)).wrap_err("reason")?;
@@ -182,27 +199,34 @@ async fn lawsuit_command_handler(
             };
 
             lawsuit
-                .initialize(
-                    command.guild_id.wrap_err("guild_id not found")?.to_string(),
-                    mongo_client,
-                )
+                .initialize(&guild_id, mongo_client)
                 .await
                 .wrap_err("initialize lawsuit")?;
 
             info!(?lawsuit, "Created lawsuit");
 
-            command
-                .create_interaction_response(http, |res| {
-                    res.kind(InteractionResponseType::ChannelMessageWithSource)
-                        .interaction_response_data(|message| {
-                            message.content("hani erstellt, keis problem")
-                        })
-                })
-                .await
-                .wrap_err("success reponse")?;
-            Ok(())
+            Ok(Response::Simple("hani erstellt, keis problem".to_owned()))
         }
-        "set_category" => Ok(()),
+        "set_category" => {
+            let channel = ChannelOption::get(options.get(0))?;
+
+            let channel = channel
+                .id
+                .to_channel(&ctx.http)
+                .await
+                .wrap_err("fetch category for set_category")?;
+            match channel.category() {
+                Some(category) => {
+                    let id = category.id;
+                    mongo_client
+                        .set_court_category(&guild_id, &id.to_string())
+                        .await?;
+                }
+                None => return Ok(Response::Simple("Das ist keine Kategorie!".to_owned())),
+            }
+
+            Ok(Response::Simple("isch gsetzt".to_owned()))
+        }
         _ => Err(eyre!("Unknown subcommand")),
     }
 }
@@ -268,6 +292,23 @@ impl GetOption for StringOption {
     ) -> crate::Result<Self::Get<'_>> {
         if let ApplicationCommandInteractionDataOptionValue::String(str) = command {
             Ok(str)
+        } else {
+            Err(eyre!("Expected string!"))
+        }
+    }
+}
+
+struct ChannelOption;
+
+#[nougat::gat]
+impl GetOption for ChannelOption {
+    type Get<'a> = &'a PartialChannel;
+
+    fn extract(
+        command: &ApplicationCommandInteractionDataOptionValue,
+    ) -> crate::Result<Self::Get<'_>> {
+        if let ApplicationCommandInteractionDataOptionValue::Channel(channel) = command {
+            Ok(channel)
         } else {
             Err(eyre!("Expected string!"))
         }
