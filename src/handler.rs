@@ -62,6 +62,19 @@ fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplic
                             .required(false)
                     })
             })
+            .create_option(|option| {
+                option
+                    .name("set_category")
+                    .description("Die Gerichtskategorie setzen")
+                    .kind(ApplicationCommandOptionType::SubCommand)
+                    .create_sub_option(|option| {
+                        option
+                            .name("category")
+                            .description("Die Kategorie")
+                            .kind(ApplicationCommandOptionType::Channel)
+                            .required(true)
+                    })
+            })
     })
 }
 
@@ -150,11 +163,13 @@ async fn lawsuit_command_handler(
     match subcomamnd.name.as_str() {
         "create" => {
             let options = &subcomamnd.options;
-            let plaintiff = get_user(options.get(0)).wrap_err("plaintiff")?;
-            let accused = get_user(options.get(1)).wrap_err("accused")?;
-            let reason = get_string(options.get(2)).wrap_err("reason")?;
-            let plaintiff_layer = get_user_optional(options.get(3)).wrap_err("plaintiff_layer")?;
-            let accused_layer = get_user_optional(options.get(4)).wrap_err("accused_layer")?;
+            let plaintiff = UserOption::get(options.get(0)).wrap_err("plaintiff")?;
+            let accused = UserOption::get(options.get(1)).wrap_err("accused")?;
+            let reason = StringOption::get(options.get(2)).wrap_err("reason")?;
+            let plaintiff_layer =
+                UserOption::get_optional(options.get(3)).wrap_err("plaintiff_layer")?;
+            let accused_layer =
+                UserOption::get_optional(options.get(4)).wrap_err("accused_layer")?;
 
             let mut lawsuit = Lawsuit {
                 plaintiff: plaintiff.0.id,
@@ -187,64 +202,74 @@ async fn lawsuit_command_handler(
                 .wrap_err("success reponse")?;
             Ok(())
         }
+        "set_category" => Ok(()),
         _ => Err(eyre!("Unknown subcommand")),
     }
 }
 
-fn get_user(
-    option: Option<&ApplicationCommandInteractionDataOption>,
-) -> color_eyre::Result<(&User, &Option<PartialMember>)> {
-    let option = get_user_optional(option);
-    match option {
-        Ok(Some(t)) => Ok(t),
-        Ok(None) => Err(eyre!("Expected value!")),
-        Err(err) => Err(err),
-    }
-}
+#[nougat::gat]
+trait GetOption {
+    type Get<'a>;
 
-fn get_user_optional(
-    option: Option<&ApplicationCommandInteractionDataOption>,
-) -> color_eyre::Result<Option<(&User, &Option<PartialMember>)>> {
-    if let Some(option) = option {
-        if let Some(command) = option.resolved.as_ref() {
-            if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
-                Ok(Some((user, member)))
+    fn extract(
+        command: &ApplicationCommandInteractionDataOptionValue,
+    ) -> color_eyre::Result<Self::Get<'_>>;
+
+    fn get(
+        option: Option<&ApplicationCommandInteractionDataOption>,
+    ) -> color_eyre::Result<Self::Get<'_>> {
+        let option = Self::get_optional(option);
+        match option {
+            Ok(Some(get)) => Ok(get),
+            Ok(None) => Err(eyre!("Expected value!")),
+            Err(err) => Err(err),
+        }
+    }
+    fn get_optional(
+        option: Option<&ApplicationCommandInteractionDataOption>,
+    ) -> color_eyre::Result<Option<Self::Get<'_>>> {
+        if let Some(option) = option {
+            if let Some(command) = option.resolved.as_ref() {
+                Self::extract(command).map(Some)
             } else {
-                Err(eyre!("Expected user!"))
+                Ok(None)
             }
         } else {
             Ok(None)
         }
-    } else {
-        Ok(None)
     }
 }
 
-fn get_string(
-    option: Option<&ApplicationCommandInteractionDataOption>,
-) -> color_eyre::Result<&str> {
-    let option = get_string_optional(option);
-    match option {
-        Ok(Some(t)) => Ok(t),
-        Ok(None) => Err(eyre!("Expected value!")),
-        Err(err) => Err(err),
-    }
-}
+struct UserOption;
 
-fn get_string_optional(
-    option: Option<&ApplicationCommandInteractionDataOption>,
-) -> color_eyre::Result<Option<&str>> {
-    if let Some(option) = option {
-        if let Some(command) = option.resolved.as_ref() {
-            if let ApplicationCommandInteractionDataOptionValue::String(str) = command {
-                Ok(Some(str))
-            } else {
-                Err(eyre!("Expected string!"))
-            }
+#[nougat::gat]
+impl GetOption for UserOption {
+    type Get<'a> = (&'a User, &'a Option<PartialMember>);
+
+    fn extract(
+        command: &ApplicationCommandInteractionDataOptionValue,
+    ) -> crate::Result<Self::Get<'_>> {
+        if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
+            Ok((user, member))
         } else {
-            Ok(None)
+            Err(eyre!("Expected user!"))
         }
-    } else {
-        Ok(None)
+    }
+}
+
+struct StringOption;
+
+#[nougat::gat]
+impl GetOption for StringOption {
+    type Get<'a> = &'a str;
+
+    fn extract(
+        command: &ApplicationCommandInteractionDataOptionValue,
+    ) -> crate::Result<Self::Get<'_>> {
+        if let ApplicationCommandInteractionDataOptionValue::String(str) = command {
+            Ok(str)
+        } else {
+            Err(eyre!("Expected string!"))
+        }
     }
 }
