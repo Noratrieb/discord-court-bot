@@ -2,6 +2,7 @@ use color_eyre::eyre::{eyre, ContextCompat};
 use serenity::{
     async_trait,
     builder::CreateApplicationCommands,
+    http::Http,
     model::{
         interactions::application_command::ApplicationCommandOptionType,
         prelude::{application_command::*, *},
@@ -12,7 +13,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     lawsuit::{Lawsuit, LawsuitState},
-    WrapErr,
+    Mongo, WrapErr,
 };
 
 fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
@@ -103,7 +104,7 @@ impl EventHandler for Handler {
 
             let result = match command.data.name.as_str() {
                 "lawsuit" => {
-                    let result = lawsuit_command_handler(&command).await;
+                    let result = lawsuit_command_handler(&command, &ctx.http, &self.mongo).await;
                     if let Err(err) = result {
                         error!(?err, "Error processing response");
                         command
@@ -140,6 +141,8 @@ impl EventHandler for Handler {
 
 async fn lawsuit_command_handler(
     command: &ApplicationCommandInteraction,
+    http: impl AsRef<Http>,
+    mongo_client: &Mongo,
 ) -> color_eyre::Result<()> {
     let options = &command.data.options;
     let subcomamnd = options.get(0).wrap_err("needs subcommand")?;
@@ -153,18 +156,35 @@ async fn lawsuit_command_handler(
             let plaintiff_layer = get_user_optional(options.get(3)).wrap_err("plaintiff_layer")?;
             let accused_layer = get_user_optional(options.get(4)).wrap_err("accused_layer")?;
 
-            let lawsuit = Lawsuit {
+            let mut lawsuit = Lawsuit {
                 plaintiff: plaintiff.0.id,
                 accused: accused.0.id,
                 plaintiff_layer: plaintiff_layer.map(|l| l.0.id),
                 accused_layer: accused_layer.map(|l| l.0.id),
                 reason: reason.to_owned(),
                 state: LawsuitState::Initial,
-                court_room: Default::default(),
+                court_room: None,
             };
+
+            lawsuit
+                .initialize(
+                    command.guild_id.wrap_err("guild_id not found")?.to_string(),
+                    mongo_client,
+                )
+                .await
+                .wrap_err("initialize lawsuit")?;
 
             info!(?lawsuit, "Created lawsuit");
 
+            command
+                .create_interaction_response(http, |res| {
+                    res.kind(InteractionResponseType::ChannelMessageWithSource)
+                        .interaction_response_data(|message| {
+                            message.content("hani erstellt, keis problem")
+                        })
+                })
+                .await
+                .wrap_err("success reponse")?;
             Ok(())
         }
         _ => Err(eyre!("Unknown subcommand")),

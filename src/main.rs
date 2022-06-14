@@ -26,7 +26,12 @@ async fn main() -> Result<()> {
     let mongo_uri = env::var("MONGO_URI").wrap_err("MONGO_URI not found in the environment")?;
     let db_name = env::var("DB_NAME").unwrap_or_else(|_| "court-bot".to_string());
 
-    let mongo = Mongo::connect(&mongo_uri, &db_name).await?;
+    let username = env::var("MONGO_INITDB_ROOT_USERNAME")
+        .wrap_err("MONGO_INITDB_ROOT_USERNAME not found in the environment")?;
+    let password = env::var("MONGO_INITDB_ROOT_PASSWORD")
+        .wrap_err("MONGO_INITDB_ROOT_PASSWORD not found in the environment")?;
+
+    let mongo = Mongo::connect(&mongo_uri, &db_name, username, password).await?;
 
     info!("Connected to mongodb");
 
