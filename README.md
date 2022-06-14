@@ -17,5 +17,5 @@ DEV=
 
 run mongodb
 ```shell
-docker run --name karin-db -d mongo:latest
+docker compose up
 ```
