@@ -1,0 +1,11 @@
+version: "3"
+services:
+  karin-db:
+    image: mongo
+    restart: on-failure
+    expose:
+      - 27017
+    ports:
+      - "27017:27017"
+    env_file:
+      - .env
