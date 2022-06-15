@@ -1,5 +1,6 @@
 use color_eyre::Result;
 use mongodb::{
+    bson,
     bson::doc,
     options::{ClientOptions, Credential},
     Client, Collection, Database,
@@ -98,12 +99,12 @@ impl Mongo {
         Ok(())
     }
 
-    pub async fn add_court_room(&self, guild_id: &str, room: CourtRoom) -> Result<()> {
+    pub async fn add_court_room(&self, guild_id: &str, room: &CourtRoom) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
         coll.update_one(
             doc! {"guild_id": &guild_id  },
-            doc! {"$push": { "court_rooms": &serde_json::to_string(&room).unwrap() }},
+            doc! {"$push": { "court_rooms": bson::to_bson(room).wrap_err("invalid bson for room")? }},
             None,
         )
         .await

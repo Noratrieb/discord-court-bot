@@ -41,6 +41,13 @@ fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplic
                     })
                     .create_sub_option(|option| {
                         option
+                            .name("judge")
+                            .description("Der Richter")
+                            .kind(ApplicationCommandOptionType::User)
+                            .required(true)
+                    })
+                    .create_sub_option(|option| {
+                        option
                             .name("reason")
                             .description("Der Grund für die Klage")
                             .kind(ApplicationCommandOptionType::String)
@@ -182,17 +189,19 @@ async fn lawsuit_command_handler(
         "create" => {
             let plaintiff = UserOption::get(options.get(0)).wrap_err("plaintiff")?;
             let accused = UserOption::get(options.get(1)).wrap_err("accused")?;
-            let reason = StringOption::get(options.get(2)).wrap_err("reason")?;
+            let judge = UserOption::get(options.get(2)).wrap_err("judge")?;
+            let reason = StringOption::get(options.get(3)).wrap_err("reason")?;
             let plaintiff_layer =
-                UserOption::get_optional(options.get(3)).wrap_err("plaintiff_layer")?;
+                UserOption::get_optional(options.get(4)).wrap_err("plaintiff_layer")?;
             let accused_layer =
-                UserOption::get_optional(options.get(4)).wrap_err("accused_layer")?;
+                UserOption::get_optional(options.get(5)).wrap_err("accused_layer")?;
 
             let mut lawsuit = Lawsuit {
-                plaintiff: plaintiff.0.id,
-                accused: accused.0.id,
-                plaintiff_layer: plaintiff_layer.map(|l| l.0.id),
-                accused_layer: accused_layer.map(|l| l.0.id),
+                plaintiff: plaintiff.0.id.to_string(),
+                accused: accused.0.id.to_string(),
+                judge: judge.0.id.to_string(),
+                plaintiff_layer: plaintiff_layer.map(|l| l.0.id.to_string()),
+                accused_layer: accused_layer.map(|l| l.0.id.to_string()),
                 reason: reason.to_owned(),
                 state: LawsuitState::Initial,
                 court_room: None,
