@@ -1,14 +1,16 @@
-use std::str::FromStr;
-
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use serenity::{
     http::Http,
-    model::{channel::PermissionOverwriteType, id::ChannelId, prelude::*, Permissions},
+    model::{channel::PermissionOverwriteType, prelude::*, Permissions},
 };
 use tracing::info;
 
-use crate::{handler::Response, model::CourtRoom, Mongo, WrapErr};
+use crate::{
+    handler::Response,
+    model::{CourtRoom, SnowflakeId},
+    Mongo, WrapErr,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum LawsuitState {
@@ -19,14 +21,14 @@ pub enum LawsuitState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lawsuit {
-    pub plaintiff: String,
-    pub accused: String,
-    pub plaintiff_layer: Option<String>,
-    pub accused_layer: Option<String>,
-    pub judge: String,
+    pub plaintiff: SnowflakeId,
+    pub accused: SnowflakeId,
+    pub plaintiff_layer: Option<SnowflakeId>,
+    pub accused_layer: Option<SnowflakeId>,
+    pub judge: SnowflakeId,
     pub reason: String,
     pub state: LawsuitState,
-    pub court_room: Option<String>,
+    pub court_room: Option<SnowflakeId>,
 }
 
 impl Lawsuit {
@@ -37,7 +39,7 @@ impl Lawsuit {
         mongo_client: &Mongo,
     ) -> Result<Response> {
         let state = mongo_client
-            .find_or_insert_state(&guild_id.to_string())
+            .find_or_insert_state(guild_id.into())
             .await?;
 
         let free_room = state
@@ -55,7 +57,7 @@ impl Lawsuit {
                     http,
                     guild_id,
                     state.court_rooms.len(),
-                    ChannelId::from_str(category).wrap_err("invalid channel_id stored")?,
+                    *category,
                     mongo_client,
                 )
                 .await
@@ -83,8 +85,6 @@ impl Lawsuit {
             return Ok(response);
         }
 
-        // TODO: now give the people their roles
-
         Ok(Response::Simple(format!(
             "ha eine ufgmacht im channel <#{}>",
             room.channel_id
@@ -104,7 +104,7 @@ impl Lawsuit {
             .channels(http)
             .await
             .wrap_err("fetch channels")?;
-        let channel = channels.get(&ChannelId::from_str(&room.channel_id).expect("oh god"));
+        let channel = channels.get(&room.channel_id.into());
 
         match channel {
             Some(channel) => {
@@ -155,7 +155,7 @@ async fn create_room(
     http: &Http,
     guild_id: GuildId,
     room_len: usize,
-    category_id: ChannelId,
+    category_id: SnowflakeId,
     mongo_client: &Mongo,
 ) -> Result<Result<CourtRoom, Response>> {
     let room_number = room_len + 1;
@@ -184,7 +184,7 @@ async fn create_room(
 
     let channel_id = match channels.values().find(|c| c.name() == room_name) {
         Some(channel) => {
-            if channel.parent_id != Some(category_id) {
+            if channel.parent_id != Some(category_id.into()) {
                 return Ok(Err(Response::Simple(format!(
                     "de channel {room_name} isch i de falsche kategorie, man eh"
                 ))));
@@ -210,13 +210,13 @@ async fn create_room(
     };
 
     let room = CourtRoom {
-        channel_id: channel_id.to_string(),
+        channel_id: channel_id.into(),
         ongoing_lawsuit: false,
-        role_id: role_id.to_string(),
+        role_id: role_id.into(),
     };
 
     mongo_client
-        .add_court_room(&guild_id.to_string(), &room)
+        .add_court_room(guild_id.into(), &room)
         .await
         .wrap_err("add court room to database")?;
 

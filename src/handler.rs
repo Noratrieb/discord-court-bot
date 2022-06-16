@@ -197,11 +197,11 @@ async fn lawsuit_command_handler(
                 UserOption::get_optional(options.get(5)).wrap_err("accused_layer")?;
 
             let mut lawsuit = Lawsuit {
-                plaintiff: plaintiff.0.id.to_string(),
-                accused: accused.0.id.to_string(),
-                judge: judge.0.id.to_string(),
-                plaintiff_layer: plaintiff_layer.map(|l| l.0.id.to_string()),
-                accused_layer: accused_layer.map(|l| l.0.id.to_string()),
+                plaintiff: plaintiff.id.into(),
+                accused: accused.id.into(),
+                judge: judge.id.into(),
+                plaintiff_layer: plaintiff_layer.map(|user| user.id.into()),
+                accused_layer: accused_layer.map(|user| user.id.into()),
                 reason: reason.to_owned(),
                 state: LawsuitState::Initial,
                 court_room: None,
@@ -228,7 +228,7 @@ async fn lawsuit_command_handler(
                 Some(category) => {
                     let id = category.id;
                     mongo_client
-                        .set_court_category(&guild_id.to_string(), &id.to_string())
+                        .set_court_category(guild_id.into(), id.into())
                         .await?;
                 }
                 None => return Ok(Response::Simple("Das ist keine Kategorie!".to_owned())),
@@ -277,13 +277,13 @@ struct UserOption;
 
 #[nougat::gat]
 impl GetOption for UserOption {
-    type Get<'a> = (&'a User, &'a Option<PartialMember>);
+    type Get<'a> = &'a User;
 
     fn extract(
         command: &ApplicationCommandInteractionDataOptionValue,
     ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
-            Ok((user, member))
+        if let ApplicationCommandInteractionDataOptionValue::User(user, _) = command {
+            Ok(user)
         } else {
             Err(eyre!("Expected user!"))
         }

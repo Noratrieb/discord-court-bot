@@ -1,28 +1,104 @@
+use std::{
+    fmt::{Display, Formatter},
+    num::ParseIntError,
+    str::FromStr,
+};
+
 use color_eyre::Result;
 use mongodb::{
     bson,
-    bson::doc,
+    bson::{doc, Bson},
     options::{ClientOptions, Credential},
     Client, Collection, Database,
 };
 use serde::{Deserialize, Serialize};
+use serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use tracing::info;
 
 use crate::{lawsuit::Lawsuit, WrapErr};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SnowflakeId(#[serde(with = "serde_string")] pub u64);
+
+impl FromStr for SnowflakeId {
+    type Err = ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        s.parse().map(Self)
+    }
+}
+
+impl Display for SnowflakeId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+mod serde_string {
+    use std::{fmt::Display, str::FromStr};
+
+    use serde::{de, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: Display,
+        S: Serializer,
+    {
+        serializer.collect_str(value)
+    }
+
+    pub fn deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: Display,
+        D: Deserializer<'de>,
+    {
+        String::deserialize(deserializer)?
+            .parse()
+            .map_err(de::Error::custom)
+    }
+}
+
+impl From<SnowflakeId> for Bson {
+    fn from(id: SnowflakeId) -> Self {
+        Bson::String(id.to_string())
+    }
+}
+
+macro_rules! from_snowflake {
+    ($($ty:ty),*) => {
+        $(
+            impl From<SnowflakeId> for $ty {
+                fn from(id: SnowflakeId) -> Self {
+                    Self(id.0)
+                }
+            }
+
+            impl From<$ty> for SnowflakeId {
+                fn from(id: $ty) -> Self {
+                    Self(id.0)
+                }
+            }
+        )*
+    };
+}
+
+from_snowflake!(GuildId, RoleId, ChannelId, UserId);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct State {
-    pub guild_id: String,
+    pub guild_id: SnowflakeId,
     pub lawsuits: Vec<Lawsuit>,
-    pub court_category: Option<String>,
+    pub court_category: Option<SnowflakeId>,
     pub court_rooms: Vec<CourtRoom>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourtRoom {
-    pub channel_id: String,
+    pub channel_id: SnowflakeId,
     pub ongoing_lawsuit: bool,
-    pub role_id: String,
+    pub role_id: SnowflakeId,
 }
 
 pub struct Mongo {
@@ -53,7 +129,7 @@ impl Mongo {
         Ok(Self { db })
     }
 
-    pub async fn find_or_insert_state(&self, guild_id: &str) -> Result<State> {
+    pub async fn find_or_insert_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let coll = self.state_coll();
         let state = coll
             .find_one(doc! {"guild_id": &guild_id  }, None)
@@ -71,7 +147,7 @@ impl Mongo {
         Ok(state)
     }
 
-    pub async fn new_state(&self, guild_id: String) -> Result<State> {
+    pub async fn new_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let state = State {
             guild_id,
             lawsuits: vec![],
@@ -86,7 +162,11 @@ impl Mongo {
         Ok(state)
     }
 
-    pub async fn set_court_category(&self, guild_id: &str, category: &str) -> Result<()> {
+    pub async fn set_court_category(
+        &self,
+        guild_id: SnowflakeId,
+        category: SnowflakeId,
+    ) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
         coll.update_one(
@@ -99,7 +179,7 @@ impl Mongo {
         Ok(())
     }
 
-    pub async fn add_court_room(&self, guild_id: &str, room: &CourtRoom) -> Result<()> {
+    pub async fn add_court_room(&self, guild_id: SnowflakeId, room: &CourtRoom) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
         coll.update_one(
