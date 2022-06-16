@@ -15,6 +15,7 @@ use crate::{
     model::SnowflakeId,
     Mongo, WrapErr,
 };
+use crate::lawsuit::LawsuitCtx;
 
 fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
     commands.create_application_command(|command| {
@@ -208,8 +209,15 @@ async fn lawsuit_command_handler(
                 court_room: SnowflakeId(0),
             };
 
-            let response = lawsuit
-                .initialize(ctx.http.clone(), guild_id, mongo_client.clone())
+            let lawsuit_ctx = LawsuitCtx {
+                lawsuit,
+                mongo_client: mongo_client.clone(),
+                http: ctx.http.clone(),
+                guild_id
+            };
+
+            let response = lawsuit_ctx
+                .initialize()
                 .await
                 .wrap_err("initialize lawsuit")?;
 

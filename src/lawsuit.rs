@@ -34,14 +34,19 @@ pub struct Lawsuit {
     pub court_room: SnowflakeId,
 }
 
-impl Lawsuit {
-    pub async fn initialize(
-        mut self,
-        http: Arc<Http>,
-        guild_id: GuildId,
-        mongo_client: Mongo,
-    ) -> Result<Response> {
-        let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+pub struct LawsuitCtx {
+    pub lawsuit: Lawsuit,
+    pub mongo_client: Mongo,
+    pub http: Arc<Http>,
+    pub guild_id: GuildId,
+}
+
+impl LawsuitCtx {
+    pub async fn initialize(mut self) -> Result<Response> {
+        let state = self
+            .mongo_client
+            .find_or_insert_state(self.guild_id.into())
+            .await?;
 
         let free_room = state
             .court_rooms
@@ -54,15 +59,10 @@ impl Lawsuit {
             (None, Some(category)) => {
                 // create room
 
-                let result = create_room(
-                    &http,
-                    guild_id,
-                    state.court_rooms.len(),
-                    *category,
-                    &mongo_client,
-                )
-                .await
-                .wrap_err("create new room")?;
+                let result = self
+                    .create_room(state.court_rooms.len(), *category)
+                    .await
+                    .wrap_err("create new room")?;
 
                 match result {
                     Err(res) => return Ok(res),
@@ -76,7 +76,7 @@ impl Lawsuit {
         };
 
         let result = self
-            .send_process_open_message(&http, guild_id, &room)
+            .send_process_open_message(&self.http, self.guild_id, &room)
             .await
             .wrap_err("send process open message")?;
 
@@ -85,10 +85,10 @@ impl Lawsuit {
         }
 
         let channel_id = room.channel_id;
-        self.court_room = channel_id;
+        self.lawsuit.court_room = channel_id;
 
         tokio::spawn(async move {
-            if let Err(err) = self.setup(guild_id, http, mongo_client, room).await {
+            if let Err(err) = self.setup(room).await {
                 error!(?err, "Error setting up lawsuit");
             }
         });
@@ -99,14 +99,16 @@ impl Lawsuit {
         )))
     }
 
-    async fn setup(
-        &self,
-        guild_id: GuildId,
-        http: Arc<Http>,
-        mongo_client: Mongo,
-        room: CourtRoom,
-    ) -> Result<()> {
-        mongo_client.add_lawsuit(guild_id.into(), self).await?;
+    async fn setup(&self, room: CourtRoom) -> Result<()> {
+        let Self {
+            mongo_client,
+            http,
+            guild_id,
+            lawsuit,
+        } = self;
+        let guild_id = *guild_id;
+
+        mongo_client.add_lawsuit(guild_id.into(), lawsuit).await?;
         mongo_client
             .set_court_room(
                 guild_id.into(),
@@ -129,18 +131,17 @@ impl Lawsuit {
 
             Ok(())
         }
-
-        assign_role(self.accused, &http, guild_id, room.role_id).await?;
-        if let Some(accused_lawyer) = self.accused_lawyer {
+        assign_role(lawsuit.accused, &http, guild_id, room.role_id).await?;
+        if let Some(accused_lawyer) = lawsuit.accused_lawyer {
             assign_role(accused_lawyer, &http, guild_id, room.role_id).await?;
         }
-        assign_role(self.plaintiff, &http, guild_id, room.role_id).await?;
-        if let Some(plaintiff_lawyer) = self.plaintiff_lawyer {
+        assign_role(lawsuit.plaintiff, &http, guild_id, room.role_id).await?;
+        if let Some(plaintiff_lawyer) = lawsuit.plaintiff_lawyer {
             assign_role(plaintiff_lawyer, &http, guild_id, room.role_id).await?;
         }
-        assign_role(self.judge, &http, guild_id, room.role_id).await?;
+        assign_role(lawsuit.judge, &http, guild_id, room.role_id).await?;
 
-        info!(?self, "Created lawsuit");
+        info!(?lawsuit, "Created lawsuit");
 
         Ok(())
     }
@@ -166,28 +167,29 @@ impl Lawsuit {
                     .id
                     .send_message(http, |msg| {
                         msg.embed(|embed| {
+                            let lawsuit = &self.lawsuit;
                             embed
                                 .title("Prozess")
-                                .field("Grund", &self.reason, false)
-                                .field("Kläger", format!("<@{}>", self.plaintiff), false)
+                                .field("Grund", &lawsuit.reason, false)
+                                .field("Kläger", format!("<@{}>", lawsuit.plaintiff), false)
                                 .field(
                                     "Anwalt des Klägers",
-                                    match &self.plaintiff_lawyer {
+                                    match &lawsuit.plaintiff_lawyer {
                                         Some(lawyer) => format!("<@{}>", lawyer),
                                         None => "TBD".to_string(),
                                     },
                                     false,
                                 )
-                                .field("Angeklagter", format!("<@{}>", self.accused), false)
+                                .field("Angeklagter", format!("<@{}>", lawsuit.accused), false)
                                 .field(
                                     "Anwalt des Angeklagten",
-                                    match &self.accused_lawyer {
+                                    match &lawsuit.accused_lawyer {
                                         Some(lawyer) => format!("<@{}>", lawyer),
                                         None => "TBD".to_string(),
                                     },
                                     false,
                                 )
-                                .field("Richter", format!("<@{}>", self.judge), false)
+                                .field("Richter", format!("<@{}>", lawsuit.judge), false)
                         })
                     })
                     .await
@@ -203,78 +205,80 @@ impl Lawsuit {
 
         Ok(Ok(()))
     }
-}
 
-async fn create_room(
-    http: &Http,
-    guild_id: GuildId,
-    room_len: usize,
-    category_id: SnowflakeId,
-    mongo_client: &Mongo,
-) -> Result<Result<CourtRoom, Response>> {
-    let room_number = room_len + 1;
-    let room_name = format!("gerichtsraum-{room_number}");
-    let role_name = format!("Gerichtsprozess {room_number}");
+    async fn create_room(
+        &self,
+        room_len: usize,
+        category_id: SnowflakeId,
+    ) -> Result<Result<CourtRoom, Response>> {
+        let room_number = room_len + 1;
+        let room_name = format!("gerichtsraum-{room_number}");
+        let role_name = format!("Gerichtsprozess {room_number}");
 
-    let guild = guild_id
-        .to_partial_guild(http)
-        .await
-        .wrap_err("fetch partial guild")?;
+        let guild = self
+            .guild_id
+            .to_partial_guild(&self.http)
+            .await
+            .wrap_err("fetch partial guild")?;
 
-    let role_id = match guild.role_by_name(&role_name) {
-        Some(role) => role.id,
-        None => {
-            guild
-                .create_role(http, |role| {
-                    role.name(role_name).permissions(Permissions::empty())
-                })
-                .await
-                .wrap_err("create role")?
-                .id
-        }
-    };
-
-    let channels = guild.channels(http).await.wrap_err("fetching channels")?;
-
-    let channel_id = match channels.values().find(|c| c.name() == room_name) {
-        Some(channel) => {
-            if channel.parent_id != Some(category_id.into()) {
-                return Ok(Err(Response::Simple(format!(
-                    "de channel {room_name} isch i de falsche kategorie, man eh"
-                ))));
+        let role_id = match guild.role_by_name(&role_name) {
+            Some(role) => role.id,
+            None => {
+                guild
+                    .create_role(&self.http, |role| {
+                        role.name(role_name).permissions(Permissions::empty())
+                    })
+                    .await
+                    .wrap_err("create role")?
+                    .id
             }
-            channel.id
-        }
-        None => {
-            guild
-                .create_channel(http, |channel| {
-                    channel
-                        .name(room_name)
-                        .category(category_id)
-                        .permissions(vec![PermissionOverwrite {
-                            allow: Permissions::SEND_MESSAGES,
-                            deny: Permissions::empty(),
-                            kind: PermissionOverwriteType::Role(role_id),
-                        }])
-                })
-                .await
-                .wrap_err("create channel")?
-                .id
-        }
-    };
+        };
 
-    let room = CourtRoom {
-        channel_id: channel_id.into(),
-        ongoing_lawsuit: false,
-        role_id: role_id.into(),
-    };
+        let channels = guild
+            .channels(&self.http)
+            .await
+            .wrap_err("fetching channels")?;
 
-    mongo_client
-        .add_court_room(guild_id.into(), &room)
-        .await
-        .wrap_err("add court room to database")?;
+        let channel_id = match channels.values().find(|c| c.name() == room_name) {
+            Some(channel) => {
+                if channel.parent_id != Some(category_id.into()) {
+                    return Ok(Err(Response::Simple(format!(
+                        "de channel {room_name} isch i de falsche kategorie, man eh"
+                    ))));
+                }
+                channel.id
+            }
+            None => {
+                guild
+                    .create_channel(&self.http, |channel| {
+                        channel
+                            .name(room_name)
+                            .category(category_id)
+                            .permissions(vec![PermissionOverwrite {
+                                allow: Permissions::SEND_MESSAGES,
+                                deny: Permissions::empty(),
+                                kind: PermissionOverwriteType::Role(role_id),
+                            }])
+                    })
+                    .await
+                    .wrap_err("create channel")?
+                    .id
+            }
+        };
 
-    info!(guild_id = %guild_id, channel_id = %channel_id, "Created new court room");
+        let room = CourtRoom {
+            channel_id: channel_id.into(),
+            ongoing_lawsuit: false,
+            role_id: role_id.into(),
+        };
 
-    Ok(Ok(room))
+        self.mongo_client
+            .add_court_room(self.guild_id.into(), &room)
+            .await
+            .wrap_err("add court room to database")?;
+
+        info!(guild_id = %self.guild_id, channel_id = %channel_id, "Created new court room");
+
+        Ok(Ok(room))
+    }
 }
