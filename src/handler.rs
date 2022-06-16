@@ -197,11 +197,11 @@ async fn lawsuit_command_handler(
                 UserOption::get_optional(options.get(5)).wrap_err("accused_layer")?;
 
             let mut lawsuit = Lawsuit {
-                plaintiff: plaintiff.id.into(),
-                accused: accused.id.into(),
-                judge: judge.id.into(),
-                plaintiff_layer: plaintiff_layer.map(|user| user.id.into()),
-                accused_layer: accused_layer.map(|user| user.id.into()),
+                plaintiff: plaintiff.0.id.into(),
+                accused: accused.0.id.into(),
+                judge: judge.0.id.into(),
+                plaintiff_lawyer: plaintiff_layer.map(|user| user.0.id.into()),
+                accused_lawyer: accused_layer.map(|user| user.0.id.into()),
                 reason: reason.to_owned(),
                 state: LawsuitState::Initial,
                 court_room: None,
@@ -277,13 +277,13 @@ struct UserOption;
 
 #[nougat::gat]
 impl GetOption for UserOption {
-    type Get<'a> = &'a User;
+    type Get<'a> = (&'a User, &'a Option<PartialMember>);
 
     fn extract(
         command: &ApplicationCommandInteractionDataOptionValue,
     ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::User(user, _) = command {
-            Ok(user)
+        if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
+            Ok((user, member))
         } else {
             Err(eyre!("Expected user!"))
         }

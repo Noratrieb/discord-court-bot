@@ -183,12 +183,46 @@ impl Mongo {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
         coll.update_one(
-            doc! {"guild_id": &guild_id  },
-            doc! {"$push": { "court_rooms": bson::to_bson(room).wrap_err("invalid bson for room")? }},
+            doc! { "guild_id": &guild_id  },
+            doc! { "$push": { "court_rooms": bson::to_bson(room).wrap_err("invalid bson for room")? }},
             None,
         )
         .await
         .wrap_err("push court room")?;
+        Ok(())
+    }
+
+    pub async fn add_lawsuit(&self, guild_id: SnowflakeId, lawsuit: &Lawsuit) -> Result<()> {
+        let _ = self.find_or_insert_state(guild_id).await?;
+        let coll = self.state_coll();
+
+        coll.update_one(
+            doc! { "guild_id": &guild_id  },
+            doc! { "$push": { "lawsuits": bson::to_bson(lawsuit).wrap_err("invalid bson for lawsuit")? } },
+            None,
+        )
+        .await
+        .wrap_err("push lawsuit")?;
+
+        Ok(())
+    }
+
+    pub async fn set_court_room(
+        &self,
+        guild_id: SnowflakeId,
+        channel_id: SnowflakeId,
+        value: impl Into<Bson>,
+    ) -> Result<()> {
+        let _ = self.find_or_insert_state(guild_id).await?;
+        let coll = self.state_coll();
+
+        coll.update_one(
+            doc! { "guild_id": &guild_id, "court_rooms.channel_id": channel_id  },
+            doc! { "$set": value.into() },
+            None,
+        )
+        .await
+        .wrap_err("set courtroom")?;
         Ok(())
     }
 

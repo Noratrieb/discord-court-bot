@@ -1,4 +1,5 @@
 use color_eyre::Result;
+use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
 use serenity::{
     http::Http,
@@ -23,8 +24,8 @@ pub enum LawsuitState {
 pub struct Lawsuit {
     pub plaintiff: SnowflakeId,
     pub accused: SnowflakeId,
-    pub plaintiff_layer: Option<SnowflakeId>,
-    pub accused_layer: Option<SnowflakeId>,
+    pub plaintiff_lawyer: Option<SnowflakeId>,
+    pub accused_lawyer: Option<SnowflakeId>,
     pub judge: SnowflakeId,
     pub reason: String,
     pub state: LawsuitState,
@@ -38,9 +39,7 @@ impl Lawsuit {
         guild_id: GuildId,
         mongo_client: &Mongo,
     ) -> Result<Response> {
-        let state = mongo_client
-            .find_or_insert_state(guild_id.into())
-            .await?;
+        let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
 
         let free_room = state
             .court_rooms
@@ -74,7 +73,7 @@ impl Lawsuit {
             )),
         };
 
-        self.court_room = Some(room.channel_id.clone());
+        self.court_room = Some(room.channel_id);
 
         let result = self
             .send_process_open_message(http, guild_id, &room)
@@ -84,6 +83,40 @@ impl Lawsuit {
         if let Err(response) = result {
             return Ok(response);
         }
+
+        mongo_client.add_lawsuit(guild_id.into(), self).await?;
+        mongo_client
+            .set_court_room(
+                guild_id.into(),
+                room.channel_id,
+                doc! { "court_rooms.$.ongoing_lawsuit": true },
+            )
+            .await?;
+
+        async fn assign_role(
+            user: SnowflakeId,
+            http: &Http,
+            guild_id: GuildId,
+            role_id: SnowflakeId,
+        ) -> Result<()> {
+            let mut member = guild_id.member(http, user).await.wrap_err("fetch member")?;
+            member
+                .add_role(http, role_id)
+                .await
+                .wrap_err("add role to member")?;
+
+            Ok(())
+        }
+
+        assign_role(self.accused, http, guild_id, room.role_id).await?;
+        if let Some(accused_lawyer) = self.accused_lawyer {
+            assign_role(accused_lawyer, http, guild_id, room.role_id).await?;
+        }
+        assign_role(self.plaintiff, http, guild_id, room.role_id).await?;
+        if let Some(plaintiff_lawyer) = self.plaintiff_lawyer {
+            assign_role(plaintiff_lawyer, http, guild_id, room.role_id).await?;
+        }
+        assign_role(self.judge, http, guild_id, room.role_id).await?;
 
         Ok(Response::Simple(format!(
             "ha eine ufgmacht im channel <#{}>",
@@ -118,7 +151,7 @@ impl Lawsuit {
                                 .field("Kläger", format!("<@{}>", self.plaintiff), false)
                                 .field(
                                     "Anwalt des Klägers",
-                                    match &self.plaintiff_layer {
+                                    match &self.plaintiff_lawyer {
                                         Some(lawyer) => format!("<@{}>", lawyer),
                                         None => "TBD".to_string(),
                                     },
@@ -127,7 +160,7 @@ impl Lawsuit {
                                 .field("Angeklagter", format!("<@{}>", self.accused), false)
                                 .field(
                                     "Anwalt des Angeklagten",
-                                    match &self.accused_layer {
+                                    match &self.accused_lawyer {
                                         Some(lawyer) => format!("<@{}>", lawyer),
                                         None => "TBD".to_string(),
                                     },
