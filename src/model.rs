@@ -7,7 +7,7 @@ use std::{
 use color_eyre::Result;
 use mongodb::{
     bson,
-    bson::{doc, Bson},
+    bson::{doc, Bson, Uuid},
     options::{ClientOptions, Credential},
     Client, Collection, Database,
 };
@@ -224,6 +224,40 @@ impl Mongo {
         )
         .await
         .wrap_err("set courtroom")?;
+        Ok(())
+    }
+
+    pub async fn set_lawsuit(
+        &self,
+        guild_id: SnowflakeId,
+        lawsuit_id: Uuid,
+        value: impl Into<Bson>,
+    ) -> Result<()> {
+        let _ = self.find_or_insert_state(guild_id).await?;
+        let coll = self.state_coll();
+
+        coll.update_one(
+            doc! { "guild_id": &guild_id, "lawsuit.id": lawsuit_id  },
+            doc! { "$set": value.into() },
+            None,
+        )
+        .await
+        .wrap_err("set courtroom")?;
+        Ok(())
+    }
+
+    pub async fn delete_guild(
+        &self,
+        guild_id: SnowflakeId,
+    ) -> Result<()> {
+        let coll = self.state_coll();
+
+        coll.delete_one(
+            doc! { "guild_id": &guild_id },
+            None,
+        )
+        .await
+        .wrap_err("delete guild")?;
         Ok(())
     }
 

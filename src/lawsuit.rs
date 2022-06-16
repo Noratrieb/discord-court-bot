@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use color_eyre::Result;
-use mongodb::bson::doc;
+use mongodb::bson::{doc, Uuid};
 use serde::{Deserialize, Serialize};
 use serenity::{
+    builder::CreateMessage,
     http::Http,
     model::{channel::PermissionOverwriteType, prelude::*, Permissions},
 };
@@ -15,22 +16,16 @@ use crate::{
     Mongo, WrapErr,
 };
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum LawsuitState {
-    Initial,
-    InProgress,
-    Completed,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lawsuit {
+    pub id: Uuid,
     pub plaintiff: SnowflakeId,
     pub accused: SnowflakeId,
     pub plaintiff_lawyer: Option<SnowflakeId>,
     pub accused_lawyer: Option<SnowflakeId>,
     pub judge: SnowflakeId,
     pub reason: String,
-    pub state: LawsuitState,
+    pub verdict: Option<String>,
     pub court_room: SnowflakeId,
 }
 
@@ -69,9 +64,8 @@ impl LawsuitCtx {
                     Ok(room) => room,
                 }
             }
-            (None, None) => return Ok(Response::Simple(
-                "Zuerst eine Kategorie für die Gerichtsräume festlegen mit `/lawsuit set_category`"
-                    .to_owned(),
+            (None, None) => return Ok(Response::EphemeralStr(
+                "Zuerst eine Kategorie für die Gerichtsräume festlegen mit `/lawsuit set_category`",
             )),
         };
 
@@ -93,7 +87,7 @@ impl LawsuitCtx {
             }
         });
 
-        Ok(Response::Simple(format!(
+        Ok(Response::Ephemeral(format!(
             "ha eine ufgmacht im channel <#{}>",
             channel_id
         )))
@@ -131,19 +125,87 @@ impl LawsuitCtx {
 
             Ok(())
         }
-        assign_role(lawsuit.accused, &http, guild_id, room.role_id).await?;
+        assign_role(lawsuit.accused, http, guild_id, room.role_id).await?;
         if let Some(accused_lawyer) = lawsuit.accused_lawyer {
-            assign_role(accused_lawyer, &http, guild_id, room.role_id).await?;
+            assign_role(accused_lawyer, http, guild_id, room.role_id).await?;
         }
-        assign_role(lawsuit.plaintiff, &http, guild_id, room.role_id).await?;
+        assign_role(lawsuit.plaintiff, http, guild_id, room.role_id).await?;
         if let Some(plaintiff_lawyer) = lawsuit.plaintiff_lawyer {
-            assign_role(plaintiff_lawyer, &http, guild_id, room.role_id).await?;
+            assign_role(plaintiff_lawyer, http, guild_id, room.role_id).await?;
         }
-        assign_role(lawsuit.judge, &http, guild_id, room.role_id).await?;
+        assign_role(lawsuit.judge, http, guild_id, room.role_id).await?;
 
         info!(?lawsuit, "Created lawsuit");
 
         Ok(())
+    }
+
+    pub async fn rule_verdict(
+        &mut self,
+        permission_override: bool,
+        user_id: UserId,
+        verdict: String,
+        room: CourtRoom,
+    ) -> Result<Result<(), Response>> {
+        if self.lawsuit.judge != user_id.into() && !permission_override {
+            return Ok(Err(Response::NoPermissions));
+        }
+
+        self.lawsuit.verdict = Some(verdict);
+        let lawsuit = &self.lawsuit;
+
+        async fn remove_role(
+            user: SnowflakeId,
+            http: &Http,
+            guild_id: GuildId,
+            role_id: SnowflakeId,
+        ) -> Result<()> {
+            let mut member = guild_id.member(http, user).await.wrap_err("fetch member")?;
+            member
+                .remove_role(http, role_id)
+                .await
+                .wrap_err("remove role from member")?;
+
+            Ok(())
+        }
+
+        let http = &self.http;
+        let guild_id = self.guild_id;
+
+        tokio::try_join!(
+            self.mongo_client.set_court_room(
+                self.guild_id.into(),
+                lawsuit.court_room,
+                doc! { "court_rooms.$.ongoing_lawsuit": false },
+            ),
+            self.mongo_client.set_lawsuit(
+                self.guild_id.into(),
+                lawsuit.id,
+                doc! { "lawsuits.$.verdict": &lawsuit.verdict },
+            ),
+            remove_role(lawsuit.accused, http, guild_id, room.role_id),
+            remove_role(lawsuit.plaintiff, http, guild_id, room.role_id),
+            remove_role(lawsuit.judge, http, guild_id, room.role_id),
+        )?;
+
+        if let Some(accused_lawyer) = lawsuit.accused_lawyer {
+            remove_role(accused_lawyer, http, guild_id, room.role_id).await?;
+        }
+        if let Some(plaintiff_lawyer) = lawsuit.plaintiff_lawyer {
+            remove_role(plaintiff_lawyer, http, guild_id, room.role_id).await?;
+        }
+
+        let response = self
+            .send_process_close_message(http, guild_id, &room)
+            .await?;
+
+        info!(?lawsuit, "Closed lawsuit");
+
+        if let Err(response) = response {
+            return Ok(Err(response));
+        }
+
+        Ok(Ok(()))
     }
 
     async fn send_process_open_message(
@@ -152,6 +214,87 @@ impl LawsuitCtx {
         guild_id: GuildId,
         room: &CourtRoom,
     ) -> Result<Result<(), Response>> {
+        self.send_court_message(http, guild_id, room, |msg| {
+            msg.embed(|embed| {
+                let lawsuit = &self.lawsuit;
+                embed
+                    .title("Prozess")
+                    .field("Grund", &lawsuit.reason, false)
+                    .field("Kläger", format!("<@{}>", lawsuit.plaintiff), true)
+                    .field(
+                        "Anwalt des Klägers",
+                        match &lawsuit.plaintiff_lawyer {
+                            Some(lawyer) => format!("<@{}>", lawyer),
+                            None => "Keinen".to_string(),
+                        },
+                        true,
+                    )
+                    .field("Angeklagter", format!("<@{}>", lawsuit.accused), true)
+                    .field(
+                        "Anwalt des Angeklagten",
+                        match &lawsuit.accused_lawyer {
+                            Some(lawyer) => format!("<@{}>", lawyer),
+                            None => "Keinen".to_string(),
+                        },
+                        true,
+                    )
+                    .field("Richter", format!("<@{}>", lawsuit.judge), true)
+            })
+        })
+        .await
+    }
+
+    async fn send_process_close_message(
+        &self,
+        http: &Http,
+        guild_id: GuildId,
+        room: &CourtRoom,
+    ) -> Result<Result<(), Response>> {
+        self.send_court_message(http, guild_id, room, |msg| {
+            msg.embed(|embed| {
+                let lawsuit = &self.lawsuit;
+                embed
+                    .title("Prozess abgeschlossen")
+                    .field("Grund", &lawsuit.reason, false)
+                    .field("Kläger", format!("<@{}>", lawsuit.plaintiff), true)
+                    .field(
+                        "Anwalt des Klägers",
+                        match &lawsuit.plaintiff_lawyer {
+                            Some(lawyer) => format!("<@{}>", lawyer),
+                            None => "Keinen".to_string(),
+                        },
+                        true,
+                    )
+                    .field("Angeklagter", format!("<@{}>", lawsuit.accused), true)
+                    .field(
+                        "Anwalt des Angeklagten",
+                        match &lawsuit.accused_lawyer {
+                            Some(lawyer) => format!("<@{}>", lawyer),
+                            None => "Keinen".to_string(),
+                        },
+                        true,
+                    )
+                    .field("Richter", format!("<@{}>", lawsuit.judge), true)
+                    .field(
+                        "Urteil",
+                        lawsuit.verdict.clone().expect("no verdict found!"),
+                        true,
+                    )
+            })
+        })
+        .await
+    }
+
+    async fn send_court_message<'a, F>(
+        &self,
+        http: &Http,
+        guild_id: GuildId,
+        room: &CourtRoom,
+        embed_builder: F,
+    ) -> Result<Result<(), Response>>
+    where
+        for<'b> F: FnOnce(&'b mut CreateMessage<'a>) -> &'b mut CreateMessage<'a>,
+    {
         let channels = guild_id
             .to_partial_guild(http)
             .await
@@ -165,40 +308,14 @@ impl LawsuitCtx {
             Some(channel) => {
                 channel
                     .id
-                    .send_message(http, |msg| {
-                        msg.embed(|embed| {
-                            let lawsuit = &self.lawsuit;
-                            embed
-                                .title("Prozess")
-                                .field("Grund", &lawsuit.reason, false)
-                                .field("Kläger", format!("<@{}>", lawsuit.plaintiff), false)
-                                .field(
-                                    "Anwalt des Klägers",
-                                    match &lawsuit.plaintiff_lawyer {
-                                        Some(lawyer) => format!("<@{}>", lawyer),
-                                        None => "TBD".to_string(),
-                                    },
-                                    false,
-                                )
-                                .field("Angeklagter", format!("<@{}>", lawsuit.accused), false)
-                                .field(
-                                    "Anwalt des Angeklagten",
-                                    match &lawsuit.accused_lawyer {
-                                        Some(lawyer) => format!("<@{}>", lawyer),
-                                        None => "TBD".to_string(),
-                                    },
-                                    false,
-                                )
-                                .field("Richter", format!("<@{}>", lawsuit.judge), false)
-                        })
-                    })
+                    .send_message(http, embed_builder)
                     .await
                     .wrap_err("send message")?;
             }
             None => {
                 // todo: remove the court room from the db
-                return Ok(Err(Response::Simple(
-                    "i ha de channel zum de prozess öffne nöd gfunde".to_string(),
+                return Ok(Err(Response::EphemeralStr(
+                    "i ha de channel für de prozess nöd gfunde",
                 )));
             }
         }
@@ -242,7 +359,7 @@ impl LawsuitCtx {
         let channel_id = match channels.values().find(|c| c.name() == room_name) {
             Some(channel) => {
                 if channel.parent_id != Some(category_id.into()) {
-                    return Ok(Err(Response::Simple(format!(
+                    return Ok(Err(Response::Ephemeral(format!(
                         "de channel {room_name} isch i de falsche kategorie, man eh"
                     ))));
                 }

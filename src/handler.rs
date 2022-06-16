@@ -1,4 +1,5 @@
 use color_eyre::eyre::{eyre, ContextCompat};
+use mongodb::bson::Uuid;
 use serenity::{
     async_trait,
     builder::CreateApplicationCommands,
@@ -11,11 +12,10 @@ use serenity::{
 use tracing::{debug, error, info};
 
 use crate::{
-    lawsuit::{Lawsuit, LawsuitState},
+    lawsuit::{Lawsuit, LawsuitCtx},
     model::SnowflakeId,
     Mongo, WrapErr,
 };
-use crate::lawsuit::LawsuitCtx;
 
 fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
     commands.create_application_command(|command| {
@@ -83,6 +83,25 @@ fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplic
                             .required(true)
                     })
             })
+            .create_option(|option| {
+                option
+                    .name("close")
+                    .description("Den Prozess abschliessen")
+                    .kind(ApplicationCommandOptionType::SubCommand)
+                    .create_sub_option(|option| {
+                        option
+                            .name("verdict")
+                            .description("Das Urteil")
+                            .kind(ApplicationCommandOptionType::String)
+                            .required(true)
+                    })
+            })
+            .create_option(|option| {
+                option
+                    .name("clear")
+                    .description("Alle Rechtsprozessdaten löschen")
+                    .kind(ApplicationCommandOptionType::SubCommand)
+            })
     })
 }
 
@@ -93,7 +112,9 @@ pub struct Handler {
 }
 
 pub enum Response {
-    Simple(String),
+    EphemeralStr(&'static str),
+    Ephemeral(String),
+    NoPermissions,
 }
 
 #[async_trait]
@@ -141,7 +162,7 @@ impl Handler {
 
         let response = match command.data.name.as_str() {
             "lawsuit" => lawsuit_command_handler(&command, &ctx, &self.mongo).await,
-            _ => Ok(Response::Simple("not implemented :(".to_owned())),
+            _ => Ok(Response::EphemeralStr("not implemented :(")),
         };
 
         match response {
@@ -151,7 +172,7 @@ impl Handler {
                 self.send_response(
                     ctx,
                     command,
-                    Response::Simple("An internal error occurred".to_owned()),
+                    Response::EphemeralStr("An internal error occurred"),
                 )
                 .await
             }
@@ -166,9 +187,27 @@ impl Handler {
     ) -> color_eyre::Result<()> {
         command
             .create_interaction_response(&ctx.http, |res| match response {
-                Response::Simple(content) => res
+                Response::EphemeralStr(content) => res
                     .kind(InteractionResponseType::ChannelMessageWithSource)
-                    .interaction_response_data(|message| message.content(content)),
+                    .interaction_response_data(|message| {
+                        message
+                            .content(content)
+                            .flags(InteractionApplicationCommandCallbackDataFlags::EPHEMERAL)
+                    }),
+                Response::Ephemeral(content) => res
+                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                    .interaction_response_data(|message| {
+                        message
+                            .content(content)
+                            .flags(InteractionApplicationCommandCallbackDataFlags::EPHEMERAL)
+                    }),
+                Response::NoPermissions => res
+                    .kind(InteractionResponseType::ChannelMessageWithSource)
+                    .interaction_response_data(|message| {
+                        message
+                            .content("du häsch kei recht für da!")
+                            .flags(InteractionApplicationCommandCallbackDataFlags::EPHEMERAL)
+                    }),
             })
             .await
             .wrap_err("sending response")?;
@@ -187,8 +226,18 @@ async fn lawsuit_command_handler(
     let options = &subcommand.options;
     let guild_id = command.guild_id.wrap_err("guild_id not found")?;
 
+    let member = command
+        .member
+        .as_ref()
+        .wrap_err("command must be used my member")?;
+    let permissions = member.permissions.wrap_err("must be in interaction")?;
+
     match subcommand.name.as_str() {
         "create" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
             let plaintiff = UserOption::get(options.get(0)).wrap_err("plaintiff")?;
             let accused = UserOption::get(options.get(1)).wrap_err("accused")?;
             let judge = UserOption::get(options.get(2)).wrap_err("judge")?;
@@ -199,13 +248,14 @@ async fn lawsuit_command_handler(
                 UserOption::get_optional(options.get(5)).wrap_err("accused_layer")?;
 
             let lawsuit = Lawsuit {
+                id: Uuid::new(),
                 plaintiff: plaintiff.0.id.into(),
                 accused: accused.0.id.into(),
                 judge: judge.0.id.into(),
                 plaintiff_lawyer: plaintiff_layer.map(|user| user.0.id.into()),
                 accused_lawyer: accused_layer.map(|user| user.0.id.into()),
                 reason: reason.to_owned(),
-                state: LawsuitState::Initial,
+                verdict: None,
                 court_room: SnowflakeId(0),
             };
 
@@ -213,7 +263,7 @@ async fn lawsuit_command_handler(
                 lawsuit,
                 mongo_client: mongo_client.clone(),
                 http: ctx.http.clone(),
-                guild_id
+                guild_id,
             };
 
             let response = lawsuit_ctx
@@ -224,6 +274,10 @@ async fn lawsuit_command_handler(
             Ok(response)
         }
         "set_category" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
             let channel = ChannelOption::get(options.get(0))?;
 
             let channel = channel
@@ -238,10 +292,79 @@ async fn lawsuit_command_handler(
                         .set_court_category(guild_id.into(), id.into())
                         .await?;
                 }
-                None => return Ok(Response::Simple("Das ist keine Kategorie!".to_owned())),
+                None => return Ok(Response::EphemeralStr("Das ist keine Kategorie!")),
             }
 
-            Ok(Response::Simple("isch gsetzt".to_owned()))
+            Ok(Response::EphemeralStr("isch gsetzt"))
+        }
+        "close" => {
+            let permission_override = permissions.contains(Permissions::MANAGE_GUILD);
+
+            let verdict = StringOption::get(options.get(0))?;
+
+            let room_id = command.channel_id;
+
+            let state = mongo_client
+                .find_or_insert_state(guild_id.into())
+                .await
+                .wrap_err("find guild for verdict")?;
+
+            let lawsuit = state
+                .lawsuits
+                .iter()
+                .find(|l| l.court_room == room_id.into() && l.verdict.is_none());
+
+            let lawsuit = match lawsuit {
+                Some(lawsuit) => lawsuit.clone(),
+                None => {
+                    return Ok(Response::EphemeralStr(
+                        "i dem channel lauft kein aktive prozess!",
+                    ))
+                }
+            };
+
+            let room = state
+                .court_rooms
+                .iter()
+                .find(|r| r.channel_id == room_id.into());
+            let room = match room {
+                Some(room) => room.clone(),
+                None => {
+                    return Ok(Response::EphemeralStr(
+                        "i dem channel lauft kein aktive prozess!",
+                    ))
+                }
+            };
+
+            let mut lawsuit_ctx = LawsuitCtx {
+                lawsuit,
+                mongo_client: mongo_client.clone(),
+                http: ctx.http.clone(),
+                guild_id,
+            };
+
+            let response = lawsuit_ctx
+                .rule_verdict(
+                    permission_override,
+                    member.user.id,
+                    verdict.to_string(),
+                    room,
+                )
+                .await?;
+
+            if let Err(response) = response {
+                return Ok(response);
+            }
+
+            Ok(Response::EphemeralStr("ich han en dir abschlosse"))
+        }
+        "clear" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
+            mongo_client.delete_guild(guild_id.into()).await?;
+            Ok(Response::EphemeralStr("alles weg"))
         }
         _ => Err(eyre!("Unknown subcommand")),
     }
