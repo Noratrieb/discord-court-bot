@@ -12,6 +12,7 @@ use tracing::{debug, error, info};
 
 use crate::{
     lawsuit::{Lawsuit, LawsuitState},
+    model::SnowflakeId,
     Mongo, WrapErr,
 };
 
@@ -196,7 +197,7 @@ async fn lawsuit_command_handler(
             let accused_layer =
                 UserOption::get_optional(options.get(5)).wrap_err("accused_layer")?;
 
-            let mut lawsuit = Lawsuit {
+            let lawsuit = Lawsuit {
                 plaintiff: plaintiff.0.id.into(),
                 accused: accused.0.id.into(),
                 judge: judge.0.id.into(),
@@ -204,15 +205,13 @@ async fn lawsuit_command_handler(
                 accused_lawyer: accused_layer.map(|user| user.0.id.into()),
                 reason: reason.to_owned(),
                 state: LawsuitState::Initial,
-                court_room: None,
+                court_room: SnowflakeId(0),
             };
 
             let response = lawsuit
-                .initialize(&ctx.http, guild_id, mongo_client)
+                .initialize(ctx.http.clone(), guild_id, mongo_client.clone())
                 .await
                 .wrap_err("initialize lawsuit")?;
-
-            info!(?lawsuit, "Created lawsuit");
 
             Ok(response)
         }

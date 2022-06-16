@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use color_eyre::Result;
 use mongodb::bson::doc;
 use serde::{Deserialize, Serialize};
@@ -5,7 +7,7 @@ use serenity::{
     http::Http,
     model::{channel::PermissionOverwriteType, prelude::*, Permissions},
 };
-use tracing::info;
+use tracing::{error, info};
 
 use crate::{
     handler::Response,
@@ -29,15 +31,15 @@ pub struct Lawsuit {
     pub judge: SnowflakeId,
     pub reason: String,
     pub state: LawsuitState,
-    pub court_room: Option<SnowflakeId>,
+    pub court_room: SnowflakeId,
 }
 
 impl Lawsuit {
     pub async fn initialize(
-        &mut self,
-        http: &Http,
+        mut self,
+        http: Arc<Http>,
         guild_id: GuildId,
-        mongo_client: &Mongo,
+        mongo_client: Mongo,
     ) -> Result<Response> {
         let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
 
@@ -53,11 +55,11 @@ impl Lawsuit {
                 // create room
 
                 let result = create_room(
-                    http,
+                    &http,
                     guild_id,
                     state.court_rooms.len(),
                     *category,
-                    mongo_client,
+                    &mongo_client,
                 )
                 .await
                 .wrap_err("create new room")?;
@@ -73,10 +75,8 @@ impl Lawsuit {
             )),
         };
 
-        self.court_room = Some(room.channel_id);
-
         let result = self
-            .send_process_open_message(http, guild_id, &room)
+            .send_process_open_message(&http, guild_id, &room)
             .await
             .wrap_err("send process open message")?;
 
@@ -84,6 +84,28 @@ impl Lawsuit {
             return Ok(response);
         }
 
+        let channel_id = room.channel_id;
+        self.court_room = channel_id;
+
+        tokio::spawn(async move {
+            if let Err(err) = self.setup(guild_id, http, mongo_client, room).await {
+                error!(?err, "Error setting up lawsuit");
+            }
+        });
+
+        Ok(Response::Simple(format!(
+            "ha eine ufgmacht im channel <#{}>",
+            channel_id
+        )))
+    }
+
+    async fn setup(
+        &self,
+        guild_id: GuildId,
+        http: Arc<Http>,
+        mongo_client: Mongo,
+        room: CourtRoom,
+    ) -> Result<()> {
         mongo_client.add_lawsuit(guild_id.into(), self).await?;
         mongo_client
             .set_court_room(
@@ -108,20 +130,19 @@ impl Lawsuit {
             Ok(())
         }
 
-        assign_role(self.accused, http, guild_id, room.role_id).await?;
+        assign_role(self.accused, &http, guild_id, room.role_id).await?;
         if let Some(accused_lawyer) = self.accused_lawyer {
-            assign_role(accused_lawyer, http, guild_id, room.role_id).await?;
+            assign_role(accused_lawyer, &http, guild_id, room.role_id).await?;
         }
-        assign_role(self.plaintiff, http, guild_id, room.role_id).await?;
+        assign_role(self.plaintiff, &http, guild_id, room.role_id).await?;
         if let Some(plaintiff_lawyer) = self.plaintiff_lawyer {
-            assign_role(plaintiff_lawyer, http, guild_id, room.role_id).await?;
+            assign_role(plaintiff_lawyer, &http, guild_id, room.role_id).await?;
         }
-        assign_role(self.judge, http, guild_id, room.role_id).await?;
+        assign_role(self.judge, &http, guild_id, room.role_id).await?;
 
-        Ok(Response::Simple(format!(
-            "ha eine ufgmacht im channel <#{}>",
-            room.channel_id
-        )))
+        info!(?self, "Created lawsuit");
+
+        Ok(())
     }
 
     async fn send_process_open_message(

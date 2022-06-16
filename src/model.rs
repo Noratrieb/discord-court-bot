@@ -101,6 +101,7 @@ pub struct CourtRoom {
     pub role_id: SnowflakeId,
 }
 
+#[derive(Clone)]
 pub struct Mongo {
     db: Database,
 }
