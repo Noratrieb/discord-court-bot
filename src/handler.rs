@@ -133,14 +133,13 @@ impl EventHandler for Handler {
         }
 
         if self.set_global_commands {
-            todo!()
-            // let guild_commands =
-            //     ApplicationCommand::create_global_application_command(&ctx.http, slash_commands)
-            //         .await;
-            // match guild_commands {
-            //     Ok(commands) => info!(?commands, "Created global commands"),
-            //     Err(error) => error!(?error, "Failed to create global commands"),
-            // }
+            let guild_commands =
+                ApplicationCommand::set_global_application_commands(&ctx.http, slash_commands)
+                    .await;
+            match guild_commands {
+                Ok(commands) => info!(?commands, "Created global commands"),
+                Err(error) => error!(?error, "Failed to create global commands"),
+            }
         }
     }
 
