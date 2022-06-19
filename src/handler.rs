@@ -517,7 +517,7 @@ async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::
     let role = match role {
         Some(role) => role,
         None => {
-            ctx.say("du mosch zerst e rolle setze mit /prison set_role");
+            ctx.say("du mosch zerst e rolle setze mit /prison set_role").await?;
             return Ok(());
         }
     };
@@ -583,105 +583,4 @@ async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> color_eyre:
 
 async fn error_handler(error: poise::FrameworkError<'_, Handler, Report>) {
     error!(?error, "Error during command execution");
-}
-
-#[nougat::gat]
-trait GetOption {
-    type Get<'a>;
-
-    fn extract(
-        command: &ApplicationCommandInteractionDataOptionValue,
-    ) -> color_eyre::Result<Self::Get<'_>>;
-
-    fn get(
-        option: Option<&ApplicationCommandInteractionDataOption>,
-    ) -> color_eyre::Result<Self::Get<'_>> {
-        let option = Self::get_optional(option);
-        match option {
-            Ok(Some(get)) => Ok(get),
-            Ok(None) => Err(eyre!("Expected value!")),
-            Err(err) => Err(err),
-        }
-    }
-    fn get_optional(
-        option: Option<&ApplicationCommandInteractionDataOption>,
-    ) -> color_eyre::Result<Option<Self::Get<'_>>> {
-        if let Some(option) = option {
-            if let Some(command) = option.resolved.as_ref() {
-                Self::extract(command).map(Some)
-            } else {
-                Ok(None)
-            }
-        } else {
-            Ok(None)
-        }
-    }
-}
-
-struct UserOption;
-
-#[nougat::gat]
-impl GetOption for UserOption {
-    type Get<'a> = (&'a User, &'a Option<PartialMember>);
-
-    fn extract(
-        command: &ApplicationCommandInteractionDataOptionValue,
-    ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::User(user, member) = command {
-            Ok((user, member))
-        } else {
-            Err(eyre!("Expected user!"))
-        }
-    }
-}
-
-struct StringOption;
-
-#[nougat::gat]
-impl GetOption for StringOption {
-    type Get<'a> = &'a str;
-
-    fn extract(
-        command: &ApplicationCommandInteractionDataOptionValue,
-    ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::String(str) = command {
-            Ok(str)
-        } else {
-            Err(eyre!("Expected string!"))
-        }
-    }
-}
-
-struct ChannelOption;
-
-#[nougat::gat]
-impl GetOption for ChannelOption {
-    type Get<'a> = &'a PartialChannel;
-
-    fn extract(
-        command: &ApplicationCommandInteractionDataOptionValue,
-    ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::Channel(channel) = command {
-            Ok(channel)
-        } else {
-            Err(eyre!("Expected string!"))
-        }
-    }
-}
-
-struct RoleOption;
-
-#[nougat::gat]
-impl GetOption for RoleOption {
-    type Get<'a> = &'a Role;
-
-    fn extract(
-        command: &ApplicationCommandInteractionDataOptionValue,
-    ) -> crate::Result<Self::Get<'_>> {
-        if let ApplicationCommandInteractionDataOptionValue::Role(role) = command {
-            Ok(role)
-        } else {
-            Err(eyre!("Expected string!"))
-        }
-    }
 }
