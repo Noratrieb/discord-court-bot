@@ -44,7 +44,7 @@ async fn main() -> Result<()> {
 
     let token = env::var("DISCORD_TOKEN").wrap_err("DISCORD_TOKEN not found in environment")?;
     let dev_guild_id = if env::var("DEV").is_ok() {
-        Some(serenity::GuildId(
+        Some(GuildId(
             env::var("GUILD_ID")
                 .wrap_err("GUILD_ID not found in environment, must be set when DEV is set")?
                 .parse()
@@ -106,7 +106,7 @@ async fn main() -> Result<()> {
             })
         })
         .options(poise::FrameworkOptions {
-            commands: vec![handler::lawsuit(), handler::prison(), hello()],
+            commands: vec![handler::lawsuit::lawsuit(), handler::prison::prison(), hello()],
             on_error: |err| Box::pin(async { handler::error_handler(err).await }),
             listener: |ctx, event, ctx2, data| {
                 Box::pin(async move { handler::listener(ctx, event, ctx2, data).await })

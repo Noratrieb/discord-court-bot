@@ -38,34 +38,7 @@ impl Display for Response {
         }
     }
 }
-/*
-#[async_trait]
-impl EventHandler for Handler {
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        info!(name = %ready.user.name, "Bot is connected!");
 
-        if let Some(guild_id) = self.dev_guild_id {
-            let guild_commands =
-                GuildId::set_application_commands(&guild_id, &ctx.http, slash_commands).await;
-
-            match guild_commands {
-                Ok(_) => info!("Installed guild slash commands"),
-                Err(error) => error!(?error, "Failed to create global commands"),
-            }
-        }
-
-        if self.set_global_commands {
-            let guild_commands =
-                ApplicationCommand::set_global_application_commands(&ctx.http, slash_commands)
-                    .await;
-            match guild_commands {
-                Ok(commands) => info!(?commands, "Created global commands"),
-                Err(error) => error!(?error, "Failed to create global commands"),
-            }
-        }
-    }
-}
-*/
 impl Handler {
     async fn handle_guild_member_join(
         &self,
@@ -99,330 +72,338 @@ impl Handler {
     }
 }
 
-#[poise::command(
-    slash_command,
-    subcommands(
-        "lawsuit_create",
-        "lawsuit_set_category",
-        "lawsuit_close",
-        "lawsuit_clear"
-    )
-)]
-pub async fn lawsuit(_: crate::Context<'_>) -> Result<()> {
-    unreachable!()
-}
+pub mod lawsuit {
+    use super::*;
 
-/// Einen neuen Gerichtsprozess erstellen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn lawsuit_create(
-    ctx: crate::Context<'_>,
-    #[description = "Der Kläger"] plaintiff: User,
-    #[description = "Der Angeklagte"] accused: User,
-    #[description = "Der Richter"] judge: User,
-    #[description = "Der Grund für die Klage"] reason: String,
-    #[description = "Der Anwalt des Klägers"] plaintiff_lawyer: Option<User>,
-    #[description = "Der Anwalt des Angeklagten"] accused_lawyer: Option<User>,
-) -> Result<()> {
-    lawsuit_create_impl(
-        ctx,
-        plaintiff,
-        accused,
-        judge,
-        reason,
-        plaintiff_lawyer,
-        accused_lawyer,
-    )
-    .await
-    .wrap_err("lawsuit_create")
-}
-
-/// Die Rolle für Gefangene setzen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn lawsuit_set_category(
-    ctx: crate::Context<'_>,
-    #[description = "Die Kategorie"] category: Channel,
-) -> Result<()> {
-    lawsuit_set_category_impl(ctx, category)
-        .await
-        .wrap_err("lawsuit_set_category")
-}
-
-/// Den Gerichtsprozess abschliessen und ein Urteil fällen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn lawsuit_close(
-    ctx: crate::Context<'_>,
-    #[description = "Das Urteil"] verdict: String,
-) -> Result<()> {
-    lawsuit_close_impl(ctx, verdict)
-        .await
-        .wrap_err("lawsuit_close")
-}
-
-/// Alle Rechtsprozessdaten löschen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn lawsuit_clear(ctx: crate::Context<'_>) -> Result<()> {
-    lawsuit_clear_impl(ctx).await.wrap_err("lawsuit_clear")
-}
-
-#[poise::command(
-    slash_command,
-    subcommands("prison_set_role", "prison_arrest", "prison_release")
-)]
-pub async fn prison(_: crate::Context<'_>) -> Result<()> {
-    unreachable!()
-}
-
-/// Die Rolle für Gefangene setzen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn prison_set_role(
-    ctx: crate::Context<'_>,
-    #[description = "Die Rolle"] role: Role,
-) -> Result<()> {
-    prison_set_role_impl(ctx, role)
-        .await
-        .wrap_err("prison_set_role")
-}
-
-/// Jemanden einsperren
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn prison_arrest(
-    ctx: crate::Context<'_>,
-    #[description = "Die Person zum einsperren"] user: User,
-) -> Result<()> {
-    prison_arrest_impl(ctx, user)
-        .await
-        .wrap_err("prison_arrest")
-}
-
-/// Einen Gefangenen freilassen
-#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
-async fn prison_release(
-    ctx: crate::Context<'_>,
-    #[description = "Die Person zum freilassen"] user: User,
-) -> Result<()> {
-    prison_release_impl(ctx, user)
-        .await
-        .wrap_err("prison_release")
-}
-
-async fn lawsuit_create_impl(
-    ctx: crate::Context<'_>,
-    plaintiff: User,
-    accused: User,
-    judge: User,
-    reason: String,
-    plaintiff_lawyer: Option<User>,
-    accused_lawyer: Option<User>,
-) -> Result<()> {
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
-
-    let lawsuit = Lawsuit {
-        id: Uuid::new(),
-        plaintiff: plaintiff.id.into(),
-        accused: accused.id.into(),
-        judge: judge.id.into(),
-        plaintiff_lawyer: plaintiff_lawyer.map(|user| user.id.into()),
-        accused_lawyer: accused_lawyer.map(|user| user.id.into()),
-        reason: reason.to_owned(),
-        verdict: None,
-        court_room: SnowflakeId(0),
-    };
-
-    let lawsuit_ctx = LawsuitCtx {
-        lawsuit,
-        mongo_client: ctx.data().mongo.clone(),
-        http: ctx.discord().http.clone(),
-        guild_id,
-    };
-
-    let response = lawsuit_ctx
-        .initialize()
-        .await
-        .wrap_err("initialize lawsuit")?;
-
-    ctx.say(response.to_string()).await?;
-
-    Ok(())
-}
-
-async fn lawsuit_set_category_impl(ctx: crate::Context<'_>, category: Channel) -> Result<()> {
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
-
-    //let channel = channel
-    //    .id
-    //    .to_channel(&ctx.http)
-    //    .await
-    //    .wrap_err("fetch category for set_category")?;
-    match category.category() {
-        Some(category) => {
-            let id = category.id;
-            ctx.data()
-                .mongo
-                .set_court_category(guild_id.into(), id.into())
-                .await?;
-            ctx.say("isch gsetzt").await?;
-        }
-        None => {
-            ctx.say("Das ist keine Kategorie!").await?;
-        }
+    #[poise::command(
+        slash_command,
+        subcommands(
+            "create",
+            "set_category",
+            "close",
+            "clear"
+        )
+    )]
+    pub async fn lawsuit(_: crate::Context<'_>) -> Result<()> {
+        unreachable!()
     }
 
-    Ok(())
-}
-
-async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> Result<()> {
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
-
-    let member = ctx.author_member().await.wrap_err("member not found")?;
-    let permission_override = member
-        .permissions
-        .wrap_err("permissions not found")?
-        .contains(Permissions::MANAGE_GUILD);
-
-    let room_id = ctx.channel_id();
-    let mongo_client = &ctx.data().mongo;
-
-    let state = mongo_client
-        .find_or_insert_state(guild_id.into())
-        .await
-        .wrap_err("find guild for verdict")?;
-
-    let lawsuit = state
-        .lawsuits
-        .iter()
-        .find(|l| l.court_room == room_id.into() && l.verdict.is_none());
-
-    let lawsuit = match lawsuit {
-        Some(lawsuit) => lawsuit.clone(),
-        None => {
-            ctx.say("i dem channel lauft kein aktive prozess!").await?;
-            return Ok(());
-        }
-    };
-
-    let room = state
-        .court_rooms
-        .iter()
-        .find(|r| r.channel_id == room_id.into());
-    let room = match room {
-        Some(room) => room.clone(),
-        None => {
-            ctx.say("i dem channel lauft kein aktive prozess!").await?;
-            return Ok(());
-        }
-    };
-
-    let mut lawsuit_ctx = LawsuitCtx {
-        lawsuit,
-        mongo_client: mongo_client.clone(),
-        http: ctx.discord().http.clone(),
-        guild_id,
-    };
-
-    let response = lawsuit_ctx
-        .rule_verdict(
-            permission_override,
-            member.user.id,
-            verdict.to_string(),
-            room,
+    /// Einen neuen Gerichtsprozess erstellen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn create(
+        ctx: crate::Context<'_>,
+        #[description = "Der Kläger"] plaintiff: User,
+        #[description = "Der Angeklagte"] accused: User,
+        #[description = "Der Richter"] judge: User,
+        #[description = "Der Grund für die Klage"] reason: String,
+        #[description = "Der Anwalt des Klägers"] plaintiff_lawyer: Option<User>,
+        #[description = "Der Anwalt des Angeklagten"] accused_lawyer: Option<User>,
+    ) -> Result<()> {
+        lawsuit_create_impl(
+            ctx,
+            plaintiff,
+            accused,
+            judge,
+            reason,
+            plaintiff_lawyer,
+            accused_lawyer,
         )
-        .await?;
+        .await
+        .wrap_err("lawsuit_create")
+    }
 
-    if let Err(response) = response {
+    /// Die Rolle für Gefangene setzen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn set_category(
+        ctx: crate::Context<'_>,
+        #[description = "Die Kategorie"] category: Channel,
+    ) -> Result<()> {
+        lawsuit_set_category_impl(ctx, category)
+            .await
+            .wrap_err("lawsuit_set_category")
+    }
+
+    /// Den Gerichtsprozess abschliessen und ein Urteil fällen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn close(
+        ctx: crate::Context<'_>,
+        #[description = "Das Urteil"] verdict: String,
+    ) -> Result<()> {
+        lawsuit_close_impl(ctx, verdict)
+            .await
+            .wrap_err("lawsuit_close")
+    }
+
+    /// Alle Rechtsprozessdaten löschen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn clear(ctx: crate::Context<'_>) -> Result<()> {
+        lawsuit_clear_impl(ctx).await.wrap_err("lawsuit_clear")
+    }
+
+    async fn lawsuit_create_impl(
+        ctx: crate::Context<'_>,
+        plaintiff: User,
+        accused: User,
+        judge: User,
+        reason: String,
+        plaintiff_lawyer: Option<User>,
+        accused_lawyer: Option<User>,
+    ) -> Result<()> {
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+
+        let lawsuit = Lawsuit {
+            id: Uuid::new(),
+            plaintiff: plaintiff.id.into(),
+            accused: accused.id.into(),
+            judge: judge.id.into(),
+            plaintiff_lawyer: plaintiff_lawyer.map(|user| user.id.into()),
+            accused_lawyer: accused_lawyer.map(|user| user.id.into()),
+            reason: reason.to_owned(),
+            verdict: None,
+            court_room: SnowflakeId(0),
+        };
+
+        let lawsuit_ctx = LawsuitCtx {
+            lawsuit,
+            mongo_client: ctx.data().mongo.clone(),
+            http: ctx.discord().http.clone(),
+            guild_id,
+        };
+
+        let response = lawsuit_ctx
+            .initialize()
+            .await
+            .wrap_err("initialize lawsuit")?;
+
         ctx.say(response.to_string()).await?;
-        return Ok(());
+
+        Ok(())
     }
 
-    ctx.say("ich han en dir abschlosse").await?;
+    async fn lawsuit_set_category_impl(ctx: crate::Context<'_>, category: Channel) -> Result<()> {
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
-    Ok(())
-}
+        //let channel = channel
+        //    .id
+        //    .to_channel(&ctx.http)
+        //    .await
+        //    .wrap_err("fetch category for set_category")?;
+        match category.category() {
+            Some(category) => {
+                let id = category.id;
+                ctx.data()
+                    .mongo
+                    .set_court_category(guild_id.into(), id.into())
+                    .await?;
+                ctx.say("isch gsetzt").await?;
+            }
+            None => {
+                ctx.say("Das ist keine Kategorie!").await?;
+            }
+        }
 
-async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> Result<()> {
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+        Ok(())
+    }
 
-    ctx.data().mongo.delete_guild(guild_id.into()).await?;
-    ctx.say("alles weg").await?;
-    Ok(())
-}
+    async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> Result<()> {
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
-async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> Result<()> {
-    ctx.data()
-        .mongo
-        .set_prison_role(
-            ctx.guild_id().wrap_err("guild_id not found")?.into(),
-            role.id.into(),
-        )
-        .await?;
+        let member = ctx.author_member().await.wrap_err("member not found")?;
+        let permission_override = member
+            .permissions
+            .wrap_err("permissions not found")?
+            .contains(Permissions::MANAGE_GUILD);
 
-    ctx.say("isch gsetzt").await.wrap_err("reply")?;
+        let room_id = ctx.channel_id();
+        let mongo_client = &ctx.data().mongo;
 
-    Ok(())
-}
+        let state = mongo_client
+            .find_or_insert_state(guild_id.into())
+            .await
+            .wrap_err("find guild for verdict")?;
 
-async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
-    let mongo_client = &ctx.data().mongo;
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
-    let http = &ctx.discord().http;
+        let lawsuit = state
+            .lawsuits
+            .iter()
+            .find(|l| l.court_room == room_id.into() && l.verdict.is_none());
 
-    let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
-    let role = state.prison_role;
+        let lawsuit = match lawsuit {
+            Some(lawsuit) => lawsuit.clone(),
+            None => {
+                ctx.say("i dem channel lauft kein aktive prozess!").await?;
+                return Ok(());
+            }
+        };
 
-    let role = match role {
-        Some(role) => role,
-        None => {
-            ctx.say("du mosch zerst e rolle setze mit /prison set_role")
-                .await?;
+        let room = state
+            .court_rooms
+            .iter()
+            .find(|r| r.channel_id == room_id.into());
+        let room = match room {
+            Some(room) => room.clone(),
+            None => {
+                ctx.say("i dem channel lauft kein aktive prozess!").await?;
+                return Ok(());
+            }
+        };
+
+        let mut lawsuit_ctx = LawsuitCtx {
+            lawsuit,
+            mongo_client: mongo_client.clone(),
+            http: ctx.discord().http.clone(),
+            guild_id,
+        };
+
+        let response = lawsuit_ctx
+            .rule_verdict(
+                permission_override,
+                member.user.id,
+                verdict.to_string(),
+                room,
+            )
+            .await?;
+
+        if let Err(response) = response {
+            ctx.say(response.to_string()).await?;
             return Ok(());
         }
-    };
 
-    mongo_client
-        .add_to_prison(guild_id.into(), user.id.into())
-        .await?;
+        ctx.say("ich han en dir abschlosse").await?;
 
-    guild_id
-        .member(http, user.id)
-        .await
-        .wrap_err("fetching guild member")?
-        .add_role(http, role)
-        .await
-        .wrap_err("add guild member role")?;
-    Ok(())
+        Ok(())
+    }
+
+    async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> Result<()> {
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+
+        ctx.data().mongo.delete_guild(guild_id.into()).await?;
+        ctx.say("alles weg").await?;
+        Ok(())
+    }
 }
 
-async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
-    let mongo_client = &ctx.data().mongo;
-    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
-    let http = &ctx.discord().http;
+pub mod prison {
+    use super::*;
 
-    let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
-    let role = state.prison_role;
+    #[poise::command(
+        slash_command,
+        subcommands("set_role", "arrest", "release")
+    )]
+    pub async fn prison(_: crate::Context<'_>) -> Result<()> {
+        unreachable!()
+    }
 
-    let role = match role {
-        Some(role) => role,
-        None => {
-            ctx.say("du mosch zerst e rolle setze mit /prison set_role")
-                .await?;
-            return Ok(());
-        }
-    };
+    /// Die Rolle für Gefangene setzen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn set_role(
+        ctx: crate::Context<'_>,
+        #[description = "Die Rolle"] role: Role,
+    ) -> Result<()> {
+        prison_set_role_impl(ctx, role)
+            .await
+            .wrap_err("prison_set_role")
+    }
 
-    mongo_client
-        .remove_from_prison(guild_id.into(), user.id.into())
-        .await?;
+    /// Jemanden einsperren
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn arrest(
+        ctx: crate::Context<'_>,
+        #[description = "Die Person zum einsperren"] user: User,
+    ) -> Result<()> {
+        prison_arrest_impl(ctx, user)
+            .await
+            .wrap_err("prison_arrest")
+    }
 
-    guild_id
-        .member(http, user.id)
-        .await
-        .wrap_err("fetching guild member")?
-        .remove_role(http, role)
-        .await
-        .wrap_err("remove guild member role")?;
+    /// Einen Gefangenen freilassen
+    #[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+    async fn release(
+        ctx: crate::Context<'_>,
+        #[description = "Die Person zum freilassen"] user: User,
+    ) -> Result<()> {
+        prison_release_impl(ctx, user)
+            .await
+            .wrap_err("prison_release")
+    }
 
-    ctx.say("d'freiheit wartet").await?;
+    async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> Result<()> {
+        ctx.data()
+            .mongo
+            .set_prison_role(
+                ctx.guild_id().wrap_err("guild_id not found")?.into(),
+                role.id.into(),
+            )
+            .await?;
 
-    Ok(())
+        ctx.say("isch gsetzt").await.wrap_err("reply")?;
+
+        Ok(())
+    }
+
+    async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
+        let mongo_client = &ctx.data().mongo;
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+        let http = &ctx.discord().http;
+
+        let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+        let role = state.prison_role;
+
+        let role = match role {
+            Some(role) => role,
+            None => {
+                ctx.say("du mosch zerst e rolle setze mit /prison set_role")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        mongo_client
+            .add_to_prison(guild_id.into(), user.id.into())
+            .await?;
+
+        guild_id
+            .member(http, user.id)
+            .await
+            .wrap_err("fetching guild member")?
+            .add_role(http, role)
+            .await
+            .wrap_err("add guild member role")?;
+        Ok(())
+    }
+
+    async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
+        let mongo_client = &ctx.data().mongo;
+        let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+        let http = &ctx.discord().http;
+
+        let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+        let role = state.prison_role;
+
+        let role = match role {
+            Some(role) => role,
+            None => {
+                ctx.say("du mosch zerst e rolle setze mit /prison set_role")
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        mongo_client
+            .remove_from_prison(guild_id.into(), user.id.into())
+            .await?;
+
+        guild_id
+            .member(http, user.id)
+            .await
+            .wrap_err("fetching guild member")?
+            .remove_role(http, role)
+            .await
+            .wrap_err("remove guild member role")?;
+
+        ctx.say("d'freiheit wartet").await?;
+
+        Ok(())
+    }
 }
 
 pub async fn listener(
