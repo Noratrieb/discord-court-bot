@@ -63,8 +63,8 @@ impl LawsuitCtx {
                     Ok(room) => room,
                 }
             }
-            (None, None) => return Ok(Response::EphemeralStr(
-                "Zuerst eine Kategorie für die Gerichtsräume festlegen mit `/lawsuit set_category`",
+            (None, None) => return Ok(Response(
+                "Zuerst eine Kategorie für die Gerichtsräume festlegen mit `/lawsuit set_category`".to_string(),
             )),
         };
 
@@ -86,7 +86,7 @@ impl LawsuitCtx {
             }
         });
 
-        Ok(Response::Ephemeral(format!(
+        Ok(Response(format!(
             "ha eine ufgmacht im channel <#{}>",
             channel_id
         )))
@@ -147,7 +147,7 @@ impl LawsuitCtx {
         room: CourtRoom,
     ) -> Result<Result<(), Response>> {
         if self.lawsuit.judge != user_id.into() && !permission_override {
-            return Ok(Err(Response::NoPermissions));
+            return Ok(Err(Response("du häsch kei recht für da!".to_string())));
         }
 
         self.lawsuit.verdict = Some(verdict);
@@ -313,8 +313,8 @@ impl LawsuitCtx {
             }
             None => {
                 // todo: remove the court room from the db
-                return Ok(Err(Response::EphemeralStr(
-                    "i ha de channel für de prozess nöd gfunde",
+                return Ok(Err(Response(
+                    "i ha de channel für de prozess nöd gfunde".to_string(),
                 )));
             }
         }
@@ -358,7 +358,7 @@ impl LawsuitCtx {
         let channel_id = match channels.values().find(|c| c.name() == room_name) {
             Some(channel) => {
                 if channel.parent_id != Some(category_id.into()) {
-                    return Ok(Err(Response::Ephemeral(format!(
+                    return Ok(Err(Response(format!(
                         "de channel {room_name} isch i de falsche kategorie, man eh"
                     ))));
                 }

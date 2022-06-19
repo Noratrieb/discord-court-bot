@@ -23,19 +23,11 @@ impl Debug for Handler {
     }
 }
 
-pub enum Response {
-    EphemeralStr(&'static str),
-    Ephemeral(String),
-    NoPermissions,
-}
+pub struct Response(pub String);
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EphemeralStr(str) => f.write_str(str),
-            Self::Ephemeral(str) => f.write_str(str),
-            Self::NoPermissions => f.write_str("du häsch kei recht für da!"),
-        }
+        f.write_str(&self.0)
     }
 }
 
@@ -431,5 +423,17 @@ pub async fn listener(
 }
 
 pub async fn error_handler(error: poise::FrameworkError<'_, Handler, Report>) {
-    error!(?error, "Error during command execution");
+    match error {
+        poise::FrameworkError::MissingUserPermissions { ctx, .. } => {
+            let _ = ctx.say("du häsch kei recht für da!").await;
+        }
+        poise::FrameworkError::GuildOnly { ctx } => {
+            let _ = ctx
+                .say("du chasch de command nur uf emene serve nutze!")
+                .await;
+        }
+        err => {
+            error!(?err, "Error during command execution");
+        }
+    }
 }
