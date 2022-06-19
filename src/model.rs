@@ -8,11 +8,11 @@ use color_eyre::Result;
 use mongodb::{
     bson,
     bson::{doc, Bson, Uuid},
-    options::{ClientOptions, Credential, UpdateOptions},
-    Client, Collection, Database,
+    options::{ClientOptions, Credential, IndexOptions, UpdateOptions},
+    Client, Collection, Database, IndexModel,
 };
+use poise::serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use serde::{Deserialize, Serialize};
-use serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use tracing::info;
 
 use crate::{lawsuit::Lawsuit, WrapErr};
@@ -114,6 +114,7 @@ pub struct Mongo {
 }
 
 impl Mongo {
+    #[tracing::instrument(skip(password))]
     pub async fn connect(
         uri: &str,
         db_name: &str,
@@ -133,10 +134,38 @@ impl Mongo {
         let client = Client::with_options(client_options).wrap_err("failed to create client")?;
 
         let db = client.database(db_name);
+        let mongo = Self { db };
 
-        Ok(Self { db })
+        info!("Creating indexes");
+
+        mongo
+            .state_coll()
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "guild_id": 1 })
+                    .options(IndexOptions::builder().name("state.guild_id".to_string()).build())
+                    .build(),
+                None,
+            )
+            .await
+            .wrap_err("create state index")?;
+
+        mongo
+            .prison_coll()
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "guild_id": 1, "user_id": 1 })
+                    .options(IndexOptions::builder().name("prison.guild_id_user_id".to_string()).build())
+                    .build(),
+                None,
+            )
+            .await
+            .wrap_err("create state index")?;
+
+        Ok(mongo)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn find_or_insert_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let coll = self.state_coll();
         let state = coll
@@ -155,6 +184,7 @@ impl Mongo {
         Ok(state)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn new_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let state = State {
             guild_id,
@@ -171,6 +201,7 @@ impl Mongo {
         Ok(state)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn set_court_category(
         &self,
         guild_id: SnowflakeId,
@@ -188,6 +219,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn set_prison_role(
         &self,
         guild_id: SnowflakeId,
@@ -205,6 +237,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_court_room(&self, guild_id: SnowflakeId, room: &CourtRoom) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
@@ -218,6 +251,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_lawsuit(&self, guild_id: SnowflakeId, lawsuit: &Lawsuit) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
@@ -233,6 +267,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, value))]
     pub async fn set_court_room(
         &self,
         guild_id: SnowflakeId,
@@ -252,6 +287,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, value))]
     pub async fn set_lawsuit(
         &self,
         guild_id: SnowflakeId,
@@ -271,6 +307,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn delete_guild(&self, guild_id: SnowflakeId) -> Result<()> {
         let coll = self.state_coll();
 
@@ -280,6 +317,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_to_prison(&self, guild_id: SnowflakeId, user_id: SnowflakeId) -> Result<()> {
         let coll = self.prison_coll();
 
@@ -298,6 +336,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn remove_from_prison(
         &self,
         guild_id: SnowflakeId,
@@ -312,6 +351,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn find_prison_entry(
         &self,
         guild_id: SnowflakeId,

@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use color_eyre::Result;
 use mongodb::bson::{doc, Uuid};
-use serde::{Deserialize, Serialize};
-use serenity::{
-    builder::CreateMessage,
-    http::Http,
-    model::{channel::PermissionOverwriteType, prelude::*, Permissions},
+use poise::{
+    serenity::model::prelude::*,
+    serenity_prelude::{CreateMessage, Http},
 };
+use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
 use crate::{

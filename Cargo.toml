@@ -13,10 +13,7 @@ tokio = { version = "1.19.2", features = ["full"] }
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 serde = { version = "1.0.137", features = ["derive"] }
-nougat = "0.1.0"
 serde_json = "1.0.81"
-
-[dependencies.serenity]
-version = "0.11.2"
-default-features = false
-features = ["builder", "cache", "client", "gateway", "collector", "http", "rustls_backend", "tokio", "typemap_rev", "utils"]
+poise = "0.2.2"
+tracing-tree = "0.2.1"
+tracing-error = "0.2.0"
