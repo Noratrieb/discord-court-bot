@@ -75,15 +75,7 @@ impl Handler {
 pub mod lawsuit {
     use super::*;
 
-    #[poise::command(
-        slash_command,
-        subcommands(
-            "create",
-            "set_category",
-            "close",
-            "clear"
-        )
-    )]
+    #[poise::command(slash_command, subcommands("create", "set_category", "close", "clear"))]
     pub async fn lawsuit(_: crate::Context<'_>) -> Result<()> {
         unreachable!()
     }
@@ -140,6 +132,7 @@ pub mod lawsuit {
         lawsuit_clear_impl(ctx).await.wrap_err("lawsuit_clear")
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn lawsuit_create_impl(
         ctx: crate::Context<'_>,
         plaintiff: User,
@@ -180,6 +173,7 @@ pub mod lawsuit {
         Ok(())
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn lawsuit_set_category_impl(ctx: crate::Context<'_>, category: Channel) -> Result<()> {
         let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
@@ -205,6 +199,7 @@ pub mod lawsuit {
         Ok(())
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> Result<()> {
         let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
@@ -273,6 +268,7 @@ pub mod lawsuit {
         Ok(())
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> Result<()> {
         let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
@@ -285,10 +281,7 @@ pub mod lawsuit {
 pub mod prison {
     use super::*;
 
-    #[poise::command(
-        slash_command,
-        subcommands("set_role", "arrest", "release")
-    )]
+    #[poise::command(slash_command, subcommands("set_role", "arrest", "release"))]
     pub async fn prison(_: crate::Context<'_>) -> Result<()> {
         unreachable!()
     }
@@ -326,6 +319,7 @@ pub mod prison {
             .wrap_err("prison_release")
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> Result<()> {
         ctx.data()
             .mongo
@@ -340,6 +334,7 @@ pub mod prison {
         Ok(())
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
         let mongo_client = &ctx.data().mongo;
         let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
@@ -371,6 +366,7 @@ pub mod prison {
         Ok(())
     }
 
+    #[tracing::instrument(skip(ctx))]
     async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
         let mongo_client = &ctx.data().mongo;
         let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;

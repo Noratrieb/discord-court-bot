@@ -12,7 +12,7 @@ use poise::{
     serenity_prelude::{Activity, GatewayIntents, GuildId},
 };
 use tracing::{error, info};
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 use crate::{handler::Handler, model::Mongo};
 
@@ -24,9 +24,9 @@ async fn main() -> Result<()> {
 
     let _ = dotenv::dotenv();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    let pretty = env::var("PRETTY").is_ok();
+
+    setup_tracing(pretty);
 
     info!("Starting up...");
 
@@ -106,7 +106,11 @@ async fn main() -> Result<()> {
             })
         })
         .options(poise::FrameworkOptions {
-            commands: vec![handler::lawsuit::lawsuit(), handler::prison::prison(), hello()],
+            commands: vec![
+                handler::lawsuit::lawsuit(),
+                handler::prison::prison(),
+                hello(),
+            ],
             on_error: |err| Box::pin(async { handler::error_handler(err).await }),
             listener: |ctx, event, ctx2, data| {
                 Box::pin(async move { handler::listener(ctx, event, ctx2, data).await })
@@ -147,4 +151,24 @@ async fn main() -> Result<()> {
 async fn hello(ctx: Context<'_>) -> Result<()> {
     ctx.say("hoi!").await?;
     Ok(())
+}
+
+fn setup_tracing(pretty: bool) {
+    let registry = Registry::default().with(EnvFilter::from_default_env());
+
+    if pretty {
+        let tree_layer = tracing_tree::HierarchicalLayer::new(2)
+            .with_targets(true)
+            .with_bracketed_fields(true);
+
+        registry.with(tree_layer).init();
+    } else {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_level(true)
+            .with_timer(tracing_subscriber::fmt::time::time())
+            .with_ansi(true)
+            .with_thread_names(true);
+
+        registry.with(fmt_layer).init();
+    };
 }

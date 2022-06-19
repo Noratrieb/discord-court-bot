@@ -137,6 +137,7 @@ impl Mongo {
         Ok(Self { db })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn find_or_insert_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let coll = self.state_coll();
         let state = coll
@@ -155,6 +156,7 @@ impl Mongo {
         Ok(state)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn new_state(&self, guild_id: SnowflakeId) -> Result<State> {
         let state = State {
             guild_id,
@@ -171,6 +173,7 @@ impl Mongo {
         Ok(state)
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn set_court_category(
         &self,
         guild_id: SnowflakeId,
@@ -188,6 +191,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn set_prison_role(
         &self,
         guild_id: SnowflakeId,
@@ -205,6 +209,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_court_room(&self, guild_id: SnowflakeId, room: &CourtRoom) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
@@ -218,6 +223,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_lawsuit(&self, guild_id: SnowflakeId, lawsuit: &Lawsuit) -> Result<()> {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
@@ -233,6 +239,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, value))]
     pub async fn set_court_room(
         &self,
         guild_id: SnowflakeId,
@@ -252,6 +259,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, value))]
     pub async fn set_lawsuit(
         &self,
         guild_id: SnowflakeId,
@@ -271,6 +279,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn delete_guild(&self, guild_id: SnowflakeId) -> Result<()> {
         let coll = self.state_coll();
 
@@ -280,6 +289,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn add_to_prison(&self, guild_id: SnowflakeId, user_id: SnowflakeId) -> Result<()> {
         let coll = self.prison_coll();
 
@@ -298,6 +308,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn remove_from_prison(
         &self,
         guild_id: SnowflakeId,
@@ -312,6 +323,7 @@ impl Mongo {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn find_prison_entry(
         &self,
         guild_id: SnowflakeId,
