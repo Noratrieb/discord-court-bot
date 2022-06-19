@@ -154,7 +154,9 @@ async fn hello(ctx: Context<'_>) -> Result<()> {
 }
 
 fn setup_tracing(pretty: bool) {
-    let registry = Registry::default().with(EnvFilter::from_default_env());
+    let registry = Registry::default()
+        .with(EnvFilter::from_default_env())
+        .with(tracing_error::ErrorLayer::default());
 
     if pretty {
         let tree_layer = tracing_tree::HierarchicalLayer::new(2)

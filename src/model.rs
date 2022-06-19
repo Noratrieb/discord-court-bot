@@ -8,8 +8,8 @@ use color_eyre::Result;
 use mongodb::{
     bson,
     bson::{doc, Bson, Uuid},
-    options::{ClientOptions, Credential, UpdateOptions},
-    Client, Collection, Database,
+    options::{ClientOptions, Credential, IndexOptions, UpdateOptions},
+    Client, Collection, Database, IndexModel,
 };
 use poise::serenity::model::id::{ChannelId, GuildId, RoleId, UserId};
 use serde::{Deserialize, Serialize};
@@ -114,6 +114,7 @@ pub struct Mongo {
 }
 
 impl Mongo {
+    #[tracing::instrument(skip(password))]
     pub async fn connect(
         uri: &str,
         db_name: &str,
@@ -133,8 +134,35 @@ impl Mongo {
         let client = Client::with_options(client_options).wrap_err("failed to create client")?;
 
         let db = client.database(db_name);
+        let mongo = Self { db };
 
-        Ok(Self { db })
+        info!("Creating indexes");
+
+        mongo
+            .state_coll()
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "guild_id": 1 })
+                    .options(IndexOptions::builder().name("state.guild_id".to_string()).build())
+                    .build(),
+                None,
+            )
+            .await
+            .wrap_err("create state index")?;
+
+        mongo
+            .prison_coll()
+            .create_index(
+                IndexModel::builder()
+                    .keys(doc! { "guild_id": 1, "user_id": 1 })
+                    .options(IndexOptions::builder().name("prison.guild_id_user_id".to_string()).build())
+                    .build(),
+                None,
+            )
+            .await
+            .wrap_err("create state index")?;
+
+        Ok(mongo)
     }
 
     #[tracing::instrument(skip(self))]
