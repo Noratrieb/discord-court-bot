@@ -18,91 +18,136 @@ use crate::{
 };
 
 fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
-    commands.create_application_command(|command| {
-        command
-            .name("lawsuit")
-            .description("Einen Gerichtsprozess starten")
-            .create_option(|option| {
-                option
-                    .name("create")
-                    .description("Einen neuen Gerichtsprozess anfangen")
-                    .kind(ApplicationCommandOptionType::SubCommand)
-                    .create_sub_option(|option| {
-                        option
-                            .name("plaintiff")
-                            .description("Der Kläger")
-                            .kind(ApplicationCommandOptionType::User)
-                            .required(true)
-                    })
-                    .create_sub_option(|option| {
-                        option
-                            .name("accused")
-                            .description("Der Angeklagte")
-                            .kind(ApplicationCommandOptionType::User)
-                            .required(true)
-                    })
-                    .create_sub_option(|option| {
-                        option
-                            .name("judge")
-                            .description("Der Richter")
-                            .kind(ApplicationCommandOptionType::User)
-                            .required(true)
-                    })
-                    .create_sub_option(|option| {
-                        option
-                            .name("reason")
-                            .description("Der Grund für die Klage")
-                            .kind(ApplicationCommandOptionType::String)
-                            .required(true)
-                    })
-                    .create_sub_option(|option| {
-                        option
-                            .name("plaintiff_lawyer")
-                            .description("Der Anwalt des Klägers")
-                            .kind(ApplicationCommandOptionType::User)
-                            .required(false)
-                    })
-                    .create_sub_option(|option| {
-                        option
-                            .name("accused_lawyer")
-                            .description("Der Anwalt des Angeklagten")
-                            .kind(ApplicationCommandOptionType::User)
-                            .required(false)
-                    })
-            })
-            .create_option(|option| {
-                option
-                    .name("set_category")
-                    .description("Die Gerichtskategorie setzen")
-                    .kind(ApplicationCommandOptionType::SubCommand)
-                    .create_sub_option(|option| {
-                        option
-                            .name("category")
-                            .description("Die Kategorie")
-                            .kind(ApplicationCommandOptionType::Channel)
-                            .required(true)
-                    })
-            })
-            .create_option(|option| {
-                option
-                    .name("close")
-                    .description("Den Prozess abschliessen")
-                    .kind(ApplicationCommandOptionType::SubCommand)
-                    .create_sub_option(|option| {
-                        option
-                            .name("verdict")
-                            .description("Das Urteil")
-                            .kind(ApplicationCommandOptionType::String)
-                            .required(true)
-                    })
-            })
-            .create_option(|option| {
-                option
-                    .name("clear")
-                    .description("Alle Rechtsprozessdaten löschen")
-                    .kind(ApplicationCommandOptionType::SubCommand)
-            })
-    })
+    commands
+        .create_application_command(|command| {
+            command
+                .name("lawsuit")
+                .description("Einen Gerichtsprozess starten")
+                .create_option(|option| {
+                    option
+                        .name("create")
+                        .description("Einen neuen Gerichtsprozess anfangen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("plaintiff")
+                                .description("Der Kläger")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
+                        .create_sub_option(|option| {
+                            option
+                                .name("accused")
+                                .description("Der Angeklagte")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
+                        .create_sub_option(|option| {
+                            option
+                                .name("judge")
+                                .description("Der Richter")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
+                        .create_sub_option(|option| {
+                            option
+                                .name("reason")
+                                .description("Der Grund für die Klage")
+                                .kind(ApplicationCommandOptionType::String)
+                                .required(true)
+                        })
+                        .create_sub_option(|option| {
+                            option
+                                .name("plaintiff_lawyer")
+                                .description("Der Anwalt des Klägers")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(false)
+                        })
+                        .create_sub_option(|option| {
+                            option
+                                .name("accused_lawyer")
+                                .description("Der Anwalt des Angeklagten")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(false)
+                        })
+                })
+                .create_option(|option| {
+                    option
+                        .name("set_category")
+                        .description("Die Gerichtskategorie setzen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("category")
+                                .description("Die Kategorie")
+                                .kind(ApplicationCommandOptionType::Channel)
+                                .required(true)
+                        })
+                })
+                .create_option(|option| {
+                    option
+                        .name("close")
+                        .description("Den Prozess abschliessen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("verdict")
+                                .description("Das Urteil")
+                                .kind(ApplicationCommandOptionType::String)
+                                .required(true)
+                        })
+                })
+                .create_option(|option| {
+                    option
+                        .name("clear")
+                        .description("Alle Rechtsprozessdaten löschen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                })
+        })
+        .create_application_command(|command| {
+            command
+                .name("prison")
+                .description("Leute im Gefängnis einsperren")
+                .create_option(|option| {
+                    option
+                        .name("arrest")
+                        .description("Jemanden einsperren")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("user")
+                                .description("Die Person zum einsperren")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
+                })
+                .create_option(|option| {
+                    option
+                        .name("release")
+                        .description("Jemanden freilassen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("user")
+                                .description("Die Person zum freilassen")
+                                .kind(ApplicationCommandOptionType::User)
+                                .required(true)
+                        })
+                })
+                .create_option(|option| {
+                    option
+                        .name("set_role")
+                        .description("Die Rolle für Gefangene setzen")
+                        .kind(ApplicationCommandOptionType::SubCommand)
+                        .create_sub_option(|option| {
+                            option
+                                .name("role")
+                                .description("Die Rolle")
+                                .kind(ApplicationCommandOptionType::Role)
+                                .required(true)
+                        })
+                })
+        })
 }
 
 pub struct Handler {
@@ -119,6 +164,12 @@ pub enum Response {
 
 #[async_trait]
 impl EventHandler for Handler {
+    async fn guild_member_addition(&self, ctx: Context, new_member: Member) {
+        if let Err(err) = self.handle_guild_member_join(ctx, new_member).await {
+            error!(?err, "An error occurred in guild_member_addition handler");
+        }
+    }
+
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!(name = %ready.user.name, "Bot is connected!");
 
@@ -146,7 +197,7 @@ impl EventHandler for Handler {
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         if let Interaction::ApplicationCommand(command) = interaction {
             if let Err(err) = self.handle_interaction(ctx, command).await {
-                error!(?err, "An error occurred");
+                error!(?err, "An error occurred in interaction_create handler");
             }
         }
     }
@@ -161,6 +212,7 @@ impl Handler {
 
         let response = match command.data.name.as_str() {
             "lawsuit" => lawsuit_command_handler(&command, &ctx, &self.mongo).await,
+            "prison" => prison_command_handler(&command, &ctx, &self.mongo).await,
             _ => Ok(Response::EphemeralStr("not implemented :(")),
         };
 
@@ -176,6 +228,36 @@ impl Handler {
                 .await
             }
         }
+    }
+
+    async fn handle_guild_member_join(
+        &self,
+        ctx: Context,
+        mut member: Member,
+    ) -> color_eyre::Result<()> {
+        let guild_id = member.guild_id;
+        let user_id = member.user.id;
+        let state = self.mongo.find_or_insert_state(guild_id.into()).await?;
+
+        debug!(member = ?member.user.id, "New member joined");
+
+        if let Some(role_id) = state.prison_role {
+            if self
+                .mongo
+                .find_prison_entry(guild_id.into(), user_id.into())
+                .await?
+                .is_some()
+            {
+                info!("New member was in prison, giving them the prison role");
+
+                member
+                    .add_role(&ctx.http, role_id)
+                    .await
+                    .wrap_err("add role to member in prison")?;
+            }
+        }
+
+        Ok(())
     }
 
     async fn send_response(
@@ -369,6 +451,107 @@ async fn lawsuit_command_handler(
     }
 }
 
+async fn prison_command_handler(
+    command: &ApplicationCommandInteraction,
+    ctx: &Context,
+    mongo_client: &Mongo,
+) -> color_eyre::Result<Response> {
+    let options = &command.data.options;
+    let subcommand = options.get(0).wrap_err("needs subcommand")?;
+
+    let options = &subcommand.options;
+    let guild_id = command.guild_id.wrap_err("guild_id not found")?;
+
+    let member = command
+        .member
+        .as_ref()
+        .wrap_err("command must be used my member")?;
+    let permissions = member.permissions.wrap_err("must be in interaction")?;
+
+    match subcommand.name.as_str() {
+        "set_role" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
+            let role = RoleOption::get(options.get(0))?;
+
+            mongo_client
+                .set_prison_role(guild_id.into(), role.id.into())
+                .await?;
+
+            Ok(Response::EphemeralStr("isch gsetzt"))
+        }
+        "arrest" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
+            let (user, _) = UserOption::get(options.get(0))?;
+
+            let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+            let role = state.prison_role;
+
+            let role = match role {
+                Some(role) => role,
+                None => {
+                    return Ok(Response::EphemeralStr(
+                        "du mosch zerst e rolle setze mit /prison set_role",
+                    ))
+                }
+            };
+
+            mongo_client
+                .add_to_prison(guild_id.into(), user.id.into())
+                .await?;
+
+            guild_id
+                .member(&ctx.http, user.id)
+                .await
+                .wrap_err("fetching guild member")?
+                .add_role(&ctx.http, role)
+                .await
+                .wrap_err("add guild member role")?;
+
+            Ok(Response::EphemeralStr("hani igsperrt"))
+        }
+        "release" => {
+            if !permissions.contains(Permissions::MANAGE_GUILD) {
+                return Ok(Response::NoPermissions);
+            }
+
+            let (user, _) = UserOption::get(options.get(0))?;
+
+            let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+            let role = state.prison_role;
+
+            let role = match role {
+                Some(role) => role,
+                None => {
+                    return Ok(Response::EphemeralStr(
+                        "du mosch zerst e rolle setze mit /prison set_role",
+                    ))
+                }
+            };
+
+            mongo_client
+                .remove_from_prison(guild_id.into(), user.id.into())
+                .await?;
+
+            guild_id
+                .member(&ctx.http, user.id)
+                .await
+                .wrap_err("fetching guild member")?
+                .remove_role(&ctx.http, role)
+                .await
+                .wrap_err("remove guild member role")?;
+
+            Ok(Response::EphemeralStr("d'freiheit wartet"))
+        }
+        _ => Err(eyre!("Unknown subcommand")),
+    }
+}
+
 #[nougat::gat]
 trait GetOption {
     type Get<'a>;
@@ -447,6 +630,23 @@ impl GetOption for ChannelOption {
     ) -> crate::Result<Self::Get<'_>> {
         if let ApplicationCommandInteractionDataOptionValue::Channel(channel) = command {
             Ok(channel)
+        } else {
+            Err(eyre!("Expected string!"))
+        }
+    }
+}
+
+struct RoleOption;
+
+#[nougat::gat]
+impl GetOption for RoleOption {
+    type Get<'a> = &'a Role;
+
+    fn extract(
+        command: &ApplicationCommandInteractionDataOptionValue,
+    ) -> crate::Result<Self::Get<'_>> {
+        if let ApplicationCommandInteractionDataOptionValue::Role(role) = command {
+            Ok(role)
         } else {
             Err(eyre!("Expected string!"))
         }

@@ -8,7 +8,7 @@ use color_eyre::Result;
 use mongodb::{
     bson,
     bson::{doc, Bson, Uuid},
-    options::{ClientOptions, Credential},
+    options::{ClientOptions, Credential, UpdateOptions},
     Client, Collection, Database,
 };
 use serde::{Deserialize, Serialize};
@@ -92,6 +92,7 @@ pub struct State {
     pub lawsuits: Vec<Lawsuit>,
     pub court_category: Option<SnowflakeId>,
     pub court_rooms: Vec<CourtRoom>,
+    pub prison_role: Option<SnowflakeId>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +100,12 @@ pub struct CourtRoom {
     pub channel_id: SnowflakeId,
     pub ongoing_lawsuit: bool,
     pub role_id: SnowflakeId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrisonEntry {
+    pub guild_id: SnowflakeId,
+    pub user_id: SnowflakeId,
 }
 
 #[derive(Clone)]
@@ -154,6 +161,7 @@ impl Mongo {
             lawsuits: vec![],
             court_category: None,
             court_rooms: vec![],
+            prison_role: None,
         };
 
         let coll = self.db.collection::<State>("state");
@@ -171,12 +179,29 @@ impl Mongo {
         let _ = self.find_or_insert_state(guild_id).await?;
         let coll = self.state_coll();
         coll.update_one(
-            doc! {"guild_id": &guild_id  },
-            doc! {"$set": { "court_category": category }},
+            doc! { "guild_id": &guild_id  },
+            doc! { "$set": { "court_category": category } },
             None,
         )
         .await
         .wrap_err("update court category")?;
+        Ok(())
+    }
+
+    pub async fn set_prison_role(
+        &self,
+        guild_id: SnowflakeId,
+        prison_role: SnowflakeId,
+    ) -> Result<()> {
+        let _ = self.find_or_insert_state(guild_id).await?;
+        let coll = self.state_coll();
+        coll.update_one(
+            doc! { "guild_id": &guild_id  },
+            doc! { "$set": { "prison_role": prison_role } },
+            None,
+        )
+        .await
+        .wrap_err("update prison role")?;
         Ok(())
     }
 
@@ -246,22 +271,64 @@ impl Mongo {
         Ok(())
     }
 
-    pub async fn delete_guild(
-        &self,
-        guild_id: SnowflakeId,
-    ) -> Result<()> {
+    pub async fn delete_guild(&self, guild_id: SnowflakeId) -> Result<()> {
         let coll = self.state_coll();
 
-        coll.delete_one(
-            doc! { "guild_id": &guild_id },
-            None,
+        coll.delete_one(doc! { "guild_id": &guild_id }, None)
+            .await
+            .wrap_err("delete guild")?;
+        Ok(())
+    }
+
+    pub async fn add_to_prison(&self, guild_id: SnowflakeId, user_id: SnowflakeId) -> Result<()> {
+        let coll = self.prison_coll();
+
+        coll.update_one(
+            doc! { "guild_id": guild_id, "user_id": user_id },
+            doc! {
+                "$setOnInsert": {
+                    "guild_id": guild_id, "user_id": user_id,
+                }
+            },
+            UpdateOptions::builder().upsert(true).build(),
         )
         .await
-        .wrap_err("delete guild")?;
+        .wrap_err("add to prison collection")?;
+
         Ok(())
+    }
+
+    pub async fn remove_from_prison(
+        &self,
+        guild_id: SnowflakeId,
+        user_id: SnowflakeId,
+    ) -> Result<()> {
+        let coll = self.prison_coll();
+
+        coll.delete_one(doc! { "guild_id": guild_id, "user_id": user_id }, None)
+            .await
+            .wrap_err("remove from prison")?;
+
+        Ok(())
+    }
+
+    pub async fn find_prison_entry(
+        &self,
+        guild_id: SnowflakeId,
+        user_id: SnowflakeId,
+    ) -> Result<Option<PrisonEntry>> {
+        let coll = self.prison_coll();
+
+        coll.find_one(doc! { "guild_id": guild_id, "user_id": user_id }, None)
+            .await
+            .wrap_err("remove from prison")
     }
 
     fn state_coll(&self) -> Collection<State> {
         self.db.collection("state")
+    }
+
+    fn prison_coll(&self) -> Collection<PrisonEntry> {
+        self.db.collection("prison")
     }
 }

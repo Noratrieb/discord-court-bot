@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
             set_global_commands,
             mongo,
         })
+        .intents(GatewayIntents::GUILD_MEMBERS)
         .await
         .wrap_err("failed to create discord client")?;
 
