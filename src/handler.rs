@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Formatter};
+
 use color_eyre::eyre::{eyre, ContextCompat};
 use mongodb::bson::Uuid;
 use serenity::{
@@ -14,7 +16,7 @@ use tracing::{debug, error, info};
 use crate::{
     lawsuit::{Lawsuit, LawsuitCtx},
     model::SnowflakeId,
-    Mongo, WrapErr,
+    Mongo, Report, WrapErr,
 };
 
 fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
@@ -156,6 +158,12 @@ pub struct Handler {
     pub mongo: Mongo,
 }
 
+impl Debug for Handler {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HandlerData")
+    }
+}
+
 pub enum Response {
     EphemeralStr(&'static str),
     Ephemeral(String),
@@ -212,7 +220,6 @@ impl Handler {
 
         let response = match command.data.name.as_str() {
             "lawsuit" => lawsuit_command_handler(&command, &ctx, &self.mongo).await,
-            "prison" => prison_command_handler(&command, &ctx, &self.mongo).await,
             _ => Ok(Response::EphemeralStr("not implemented :(")),
         };
 
@@ -451,105 +458,131 @@ async fn lawsuit_command_handler(
     }
 }
 
-async fn prison_command_handler(
-    command: &ApplicationCommandInteraction,
-    ctx: &Context,
-    mongo_client: &Mongo,
-) -> color_eyre::Result<Response> {
-    let options = &command.data.options;
-    let subcommand = options.get(0).wrap_err("needs subcommand")?;
+#[poise::command(
+    slash_command,
+    subcommands("prison_set_role", "prison_arrest", "prison_release")
+)]
+async fn prison(_: crate::Context<'_>) -> color_eyre::Result<()> {
+    unreachable!()
+}
 
-    let options = &subcommand.options;
-    let guild_id = command.guild_id.wrap_err("guild_id not found")?;
+/// Die Rolle für Gefangene setzen
+#[poise::command(
+    slash_command,
+    required_permissions = "MANAGE_GUILD",
+    on_error = "error_handler"
+)]
+async fn prison_set_role(
+    ctx: crate::Context<'_>,
+    #[description = "Die rolle"] role: Role,
+) -> color_eyre::Result<()> {
+    prison_set_role_impl(ctx, role)
+        .await
+        .wrap_err("prison_set_role")
+}
 
-    let member = command
-        .member
-        .as_ref()
-        .wrap_err("command must be used my member")?;
-    let permissions = member.permissions.wrap_err("must be in interaction")?;
+async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> color_eyre::Result<()> {
+    ctx.data()
+        .mongo
+        .set_prison_role(
+            ctx.guild_id().wrap_err("guild_id not found")?.into(),
+            role.id.into(),
+        )
+        .await?;
 
-    match subcommand.name.as_str() {
-        "set_role" => {
-            if !permissions.contains(Permissions::MANAGE_GUILD) {
-                return Ok(Response::NoPermissions);
-            }
+    ctx.say("isch gsetzt").await.wrap_err("reply")?;
 
-            let role = RoleOption::get(options.get(0))?;
+    Ok(())
+}
 
-            mongo_client
-                .set_prison_role(guild_id.into(), role.id.into())
-                .await?;
+/// Jemanden einsperren
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+async fn prison_arrest(
+    ctx: crate::Context<'_>,
+    #[description = "Die Person zum einsperren"] user: User,
+) -> color_eyre::Result<()> {
+    prison_arrest_impl(ctx, user)
+        .await
+        .wrap_err("prison_arrest")
+}
 
-            Ok(Response::EphemeralStr("isch gsetzt"))
+async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::Result<()> {
+    let mongo_client = &ctx.data().mongo;
+    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+    let http = &ctx.discord().http;
+
+    let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+    let role = state.prison_role;
+
+    let role = match role {
+        Some(role) => role,
+        None => {
+            ctx.say("du mosch zerst e rolle setze mit /prison set_role");
+            return Ok(());
         }
-        "arrest" => {
-            if !permissions.contains(Permissions::MANAGE_GUILD) {
-                return Ok(Response::NoPermissions);
-            }
+    };
 
-            let (user, _) = UserOption::get(options.get(0))?;
+    mongo_client
+        .add_to_prison(guild_id.into(), user.id.into())
+        .await?;
 
-            let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
-            let role = state.prison_role;
+    guild_id
+        .member(http, user.id)
+        .await
+        .wrap_err("fetching guild member")?
+        .add_role(http, role)
+        .await
+        .wrap_err("add guild member role")?;
+    Ok(())
+}
 
-            let role = match role {
-                Some(role) => role,
-                None => {
-                    return Ok(Response::EphemeralStr(
-                        "du mosch zerst e rolle setze mit /prison set_role",
-                    ))
-                }
-            };
+/// Einen Gefangenen freilassen
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+async fn prison_release(
+    ctx: crate::Context<'_>,
+    #[description = "Die Person zum freilassen"] user: User,
+) -> color_eyre::Result<()> {
+    prison_release_impl(ctx, user)
+        .await
+        .wrap_err("prison_release")
+}
 
-            mongo_client
-                .add_to_prison(guild_id.into(), user.id.into())
+async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::Result<()> {
+    let mongo_client = &ctx.data().mongo;
+    let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
+    let http = &ctx.discord().http;
+
+    let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
+    let role = state.prison_role;
+
+    let role = match role {
+        Some(role) => role,
+        None => {
+            ctx.say("du mosch zerst e rolle setze mit /prison set_role")
                 .await?;
-
-            guild_id
-                .member(&ctx.http, user.id)
-                .await
-                .wrap_err("fetching guild member")?
-                .add_role(&ctx.http, role)
-                .await
-                .wrap_err("add guild member role")?;
-
-            Ok(Response::EphemeralStr("hani igsperrt"))
+            return Ok(());
         }
-        "release" => {
-            if !permissions.contains(Permissions::MANAGE_GUILD) {
-                return Ok(Response::NoPermissions);
-            }
+    };
 
-            let (user, _) = UserOption::get(options.get(0))?;
+    mongo_client
+        .remove_from_prison(guild_id.into(), user.id.into())
+        .await?;
 
-            let state = mongo_client.find_or_insert_state(guild_id.into()).await?;
-            let role = state.prison_role;
+    guild_id
+        .member(http, user.id)
+        .await
+        .wrap_err("fetching guild member")?
+        .remove_role(http, role)
+        .await
+        .wrap_err("remove guild member role")?;
 
-            let role = match role {
-                Some(role) => role,
-                None => {
-                    return Ok(Response::EphemeralStr(
-                        "du mosch zerst e rolle setze mit /prison set_role",
-                    ))
-                }
-            };
+    ctx.say("d'freiheit wartet").await?;
 
-            mongo_client
-                .remove_from_prison(guild_id.into(), user.id.into())
-                .await?;
+    Ok(())
+}
 
-            guild_id
-                .member(&ctx.http, user.id)
-                .await
-                .wrap_err("fetching guild member")?
-                .remove_role(&ctx.http, role)
-                .await
-                .wrap_err("remove guild member role")?;
-
-            Ok(Response::EphemeralStr("d'freiheit wartet"))
-        }
-        _ => Err(eyre!("Unknown subcommand")),
-    }
+async fn error_handler(error: poise::FrameworkError<'_, Handler, Report>) {
+    error!(?error, "Error during command execution");
 }
 
 #[nougat::gat]

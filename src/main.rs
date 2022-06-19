@@ -6,12 +6,14 @@ mod model;
 
 use std::env;
 
-use color_eyre::{eyre::WrapErr, Result};
+use color_eyre::{eyre::WrapErr, Report, Result};
 use serenity::{model::prelude::*, prelude::*};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::{handler::Handler, model::Mongo};
+
+type Context<'a> = poise::Context<'a, Handler, Report>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
