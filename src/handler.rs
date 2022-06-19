@@ -1,16 +1,8 @@
 use std::fmt::{Debug, Display, Formatter};
 
-use color_eyre::eyre::{eyre, ContextCompat};
+use color_eyre::{eyre::ContextCompat, Result};
 use mongodb::bson::Uuid;
-use serenity::{
-    async_trait,
-    builder::CreateApplicationCommands,
-    model::{
-        interactions::application_command::ApplicationCommandOptionType,
-        prelude::{application_command::*, *},
-    },
-    prelude::*,
-};
+use poise::{serenity::model::prelude::*, serenity_prelude as serenity, Event};
 use tracing::{debug, error, info};
 
 use crate::{
@@ -18,20 +10,6 @@ use crate::{
     model::SnowflakeId,
     Mongo, Report, WrapErr,
 };
-
-fn slash_commands(commands: &mut CreateApplicationCommands) -> &mut CreateApplicationCommands {
-    commands.create_application_command(|command| {
-        command
-            .name("lawsuit")
-            .description("Einen Gerichtsprozess starten")
-            .create_option(|option| {
-                option
-                    .name("clear")
-                    .description("Alle Rechtsprozessdaten löschen")
-                    .kind(ApplicationCommandOptionType::SubCommand)
-            })
-    })
-}
 
 pub struct Handler {
     pub dev_guild_id: Option<GuildId>,
@@ -60,15 +38,9 @@ impl Display for Response {
         }
     }
 }
-
+/*
 #[async_trait]
 impl EventHandler for Handler {
-    async fn guild_member_addition(&self, ctx: Context, new_member: Member) {
-        if let Err(err) = self.handle_guild_member_join(ctx, new_member).await {
-            error!(?err, "An error occurred in guild_member_addition handler");
-        }
-    }
-
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!(name = %ready.user.name, "Bot is connected!");
 
@@ -93,13 +65,13 @@ impl EventHandler for Handler {
         }
     }
 }
-
+*/
 impl Handler {
     async fn handle_guild_member_join(
         &self,
-        ctx: Context,
-        mut member: Member,
-    ) -> color_eyre::Result<()> {
+        ctx: &serenity::Context,
+        member: &Member,
+    ) -> Result<()> {
         let guild_id = member.guild_id;
         let user_id = member.user.id;
         let state = self.mongo.find_or_insert_state(guild_id.into()).await?;
@@ -116,6 +88,7 @@ impl Handler {
                 info!("New member was in prison, giving them the prison role");
 
                 member
+                    .clone()
                     .add_role(&ctx.http, role_id)
                     .await
                     .wrap_err("add role to member in prison")?;
@@ -128,9 +101,14 @@ impl Handler {
 
 #[poise::command(
     slash_command,
-    subcommands("prison_set_role", "prison_arrest", "prison_release")
+    subcommands(
+        "lawsuit_create",
+        "lawsuit_set_category",
+        "lawsuit_close",
+        "lawsuit_clear"
+    )
 )]
-async fn lawsuit(_: crate::Context<'_>) -> color_eyre::Result<()> {
+pub async fn lawsuit(_: crate::Context<'_>) -> Result<()> {
     unreachable!()
 }
 
@@ -144,7 +122,7 @@ async fn lawsuit_create(
     #[description = "Der Grund für die Klage"] reason: String,
     #[description = "Der Anwalt des Klägers"] plaintiff_lawyer: Option<User>,
     #[description = "Der Anwalt des Angeklagten"] accused_lawyer: Option<User>,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     lawsuit_create_impl(
         ctx,
         plaintiff,
@@ -159,42 +137,30 @@ async fn lawsuit_create(
 }
 
 /// Die Rolle für Gefangene setzen
-#[poise::command(
-    slash_command,
-    required_permissions = "MANAGE_GUILD",
-    on_error = "error_handler"
-)]
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 async fn lawsuit_set_category(
     ctx: crate::Context<'_>,
     #[description = "Die Kategorie"] category: Channel,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     lawsuit_set_category_impl(ctx, category)
         .await
         .wrap_err("lawsuit_set_category")
 }
 
 /// Den Gerichtsprozess abschliessen und ein Urteil fällen
-#[poise::command(
-    slash_command,
-    required_permissions = "MANAGE_GUILD",
-    on_error = "error_handler"
-)]
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 async fn lawsuit_close(
     ctx: crate::Context<'_>,
     #[description = "Das Urteil"] verdict: String,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     lawsuit_close_impl(ctx, verdict)
         .await
         .wrap_err("lawsuit_close")
 }
 
 /// Alle Rechtsprozessdaten löschen
-#[poise::command(
-    slash_command,
-    required_permissions = "MANAGE_GUILD",
-    on_error = "error_handler"
-)]
-async fn lawsuit_clear(ctx: crate::Context<'_>) -> color_eyre::Result<()> {
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
+async fn lawsuit_clear(ctx: crate::Context<'_>) -> Result<()> {
     lawsuit_clear_impl(ctx).await.wrap_err("lawsuit_clear")
 }
 
@@ -202,20 +168,16 @@ async fn lawsuit_clear(ctx: crate::Context<'_>) -> color_eyre::Result<()> {
     slash_command,
     subcommands("prison_set_role", "prison_arrest", "prison_release")
 )]
-async fn prison(_: crate::Context<'_>) -> color_eyre::Result<()> {
+pub async fn prison(_: crate::Context<'_>) -> Result<()> {
     unreachable!()
 }
 
 /// Die Rolle für Gefangene setzen
-#[poise::command(
-    slash_command,
-    required_permissions = "MANAGE_GUILD",
-    on_error = "error_handler"
-)]
+#[poise::command(slash_command, required_permissions = "MANAGE_GUILD")]
 async fn prison_set_role(
     ctx: crate::Context<'_>,
     #[description = "Die Rolle"] role: Role,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     prison_set_role_impl(ctx, role)
         .await
         .wrap_err("prison_set_role")
@@ -226,7 +188,7 @@ async fn prison_set_role(
 async fn prison_arrest(
     ctx: crate::Context<'_>,
     #[description = "Die Person zum einsperren"] user: User,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     prison_arrest_impl(ctx, user)
         .await
         .wrap_err("prison_arrest")
@@ -237,7 +199,7 @@ async fn prison_arrest(
 async fn prison_release(
     ctx: crate::Context<'_>,
     #[description = "Die Person zum freilassen"] user: User,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     prison_release_impl(ctx, user)
         .await
         .wrap_err("prison_release")
@@ -251,7 +213,7 @@ async fn lawsuit_create_impl(
     reason: String,
     plaintiff_lawyer: Option<User>,
     accused_lawyer: Option<User>,
-) -> color_eyre::Result<()> {
+) -> Result<()> {
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
     let lawsuit = Lawsuit {
@@ -283,10 +245,7 @@ async fn lawsuit_create_impl(
     Ok(())
 }
 
-async fn lawsuit_set_category_impl(
-    ctx: crate::Context<'_>,
-    category: Channel,
-) -> color_eyre::Result<()> {
+async fn lawsuit_set_category_impl(ctx: crate::Context<'_>, category: Channel) -> Result<()> {
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
     //let channel = channel
@@ -311,7 +270,7 @@ async fn lawsuit_set_category_impl(
     Ok(())
 }
 
-async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> color_eyre::Result<()> {
+async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> Result<()> {
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
     let member = ctx.author_member().await.wrap_err("member not found")?;
@@ -379,7 +338,7 @@ async fn lawsuit_close_impl(ctx: crate::Context<'_>, verdict: String) -> color_e
     Ok(())
 }
 
-async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> color_eyre::Result<()> {
+async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> Result<()> {
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
 
     ctx.data().mongo.delete_guild(guild_id.into()).await?;
@@ -387,7 +346,7 @@ async fn lawsuit_clear_impl(ctx: crate::Context<'_>) -> color_eyre::Result<()> {
     Ok(())
 }
 
-async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> color_eyre::Result<()> {
+async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> Result<()> {
     ctx.data()
         .mongo
         .set_prison_role(
@@ -401,7 +360,7 @@ async fn prison_set_role_impl(ctx: crate::Context<'_>, role: Role) -> color_eyre
     Ok(())
 }
 
-async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::Result<()> {
+async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
     let mongo_client = &ctx.data().mongo;
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
     let http = &ctx.discord().http;
@@ -432,7 +391,7 @@ async fn prison_arrest_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::
     Ok(())
 }
 
-async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> color_eyre::Result<()> {
+async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> Result<()> {
     let mongo_client = &ctx.data().mongo;
     let guild_id = ctx.guild_id().wrap_err("guild_id not found")?;
     let http = &ctx.discord().http;
@@ -466,6 +425,26 @@ async fn prison_release_impl(ctx: crate::Context<'_>, user: User) -> color_eyre:
     Ok(())
 }
 
-async fn error_handler(error: poise::FrameworkError<'_, Handler, Report>) {
+pub async fn listener(
+    ctx: &serenity::Context,
+    event: &Event<'_>,
+    _: poise::FrameworkContext<'_, Handler, Report>,
+    data: &Handler,
+) -> Result<()> {
+    match event {
+        Event::GuildMemberAddition { new_member } => {
+            if let Err(err) = data.handle_guild_member_join(ctx, &new_member).await {
+                error!(?err, "An error occurred in guild_member_addition handler");
+            }
+        }
+        Event::Ready { data_about_bot } => {
+            info!(name = %data_about_bot.user.name, "Bot is connected!");
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+pub async fn error_handler(error: poise::FrameworkError<'_, Handler, Report>) {
     error!(?error, "Error during command execution");
 }

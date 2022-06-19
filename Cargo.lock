@@ -206,7 +206,6 @@ dependencies = [
  "poise",
  "serde",
  "serde_json",
- "serenity",
  "tokio",
  "tracing",
  "tracing-subscriber",

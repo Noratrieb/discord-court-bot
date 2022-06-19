@@ -7,7 +7,7 @@ mod model;
 use std::env;
 
 use color_eyre::{eyre::WrapErr, Report, Result};
-use serenity::{model::prelude::*, prelude::*};
+use poise::serenity_prelude as serenity;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
     let token = env::var("DISCORD_TOKEN").wrap_err("DISCORD_TOKEN not found in environment")?;
     let dev_guild_id = if env::var("DEV").is_ok() {
-        Some(GuildId(
+        Some(serenity::GuildId(
             env::var("GUILD_ID")
                 .wrap_err("GUILD_ID not found in environment, must be set when DEV is set")?
                 .parse()
@@ -53,15 +53,28 @@ async fn main() -> Result<()> {
 
     let set_global_commands = env::var("SET_GLOBAL").is_ok();
 
-    let mut client = Client::builder(token, GatewayIntents::empty())
-        .event_handler(Handler {
-            dev_guild_id,
-            set_global_commands,
-            mongo,
+    poise::Framework::build()
+        .token(token)
+        .user_data_setup(move |_, _, _| {
+            Box::pin(async move {
+                Ok(Handler {
+                    dev_guild_id,
+                    set_global_commands,
+                    mongo,
+                })
+            })
         })
-        .intents(GatewayIntents::GUILD_MEMBERS)
+        .options(poise::FrameworkOptions {
+            commands: vec![handler::lawsuit(), handler::prison()],
+            on_error: |err| Box::pin(async { handler::error_handler(err).await }),
+            listener: |ctx, event, ctx2, data| {
+                Box::pin(async move { handler::listener(ctx, event, ctx2, data).await })
+            },
+            ..Default::default()
+        })
+        .intents(serenity::GatewayIntents::GUILD_MEMBERS)
+        .run()
         .await
         .wrap_err("failed to create discord client")?;
-
-    client.start().await.wrap_err("running client")
+    Ok(())
 }
