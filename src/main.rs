@@ -7,8 +7,11 @@ mod model;
 use std::env;
 
 use color_eyre::{eyre::WrapErr, Report, Result};
-use poise::serenity_prelude as serenity;
-use tracing::info;
+use poise::{
+    serenity_prelude as serenity,
+    serenity_prelude::{Activity, GatewayIntents, GuildId},
+};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 use crate::{handler::Handler, model::Mongo};
@@ -55,26 +58,93 @@ async fn main() -> Result<()> {
 
     poise::Framework::build()
         .token(token)
-        .user_data_setup(move |_, _, _| {
+        .user_data_setup(move |ctx, ready, framework| {
             Box::pin(async move {
-                Ok(Handler {
+                let data = Handler {
                     dev_guild_id,
                     set_global_commands,
                     mongo,
-                })
+                };
+
+                let commands = &framework.options().commands;
+                let create_commands = poise::builtins::create_application_commands(commands);
+
+                if data.set_global_commands {
+                    info!("Installing global slash commands...");
+                    let guild_commands =
+                        serenity::ApplicationCommand::set_global_application_commands(ctx, |b| {
+                            *b = create_commands.clone();
+                            b
+                        })
+                        .await;
+                    match guild_commands {
+                        Ok(commands) => info!(?commands, "Created global commands"),
+                        Err(error) => error!(?error, "Failed to create global commands"),
+                    }
+                }
+
+                if let Some(guild_id) = data.dev_guild_id {
+                    info!("Installing guild commands...");
+                    let guild_commands = GuildId::set_application_commands(&guild_id, ctx, |b| {
+                        *b = create_commands;
+                        b
+                    })
+                    .await;
+
+                    match guild_commands {
+                        Ok(_) => info!("Installed guild slash commands"),
+                        Err(error) => error!(?error, "Failed to create global commands"),
+                    }
+                }
+
+                ctx.set_activity(Activity::playing("für Recht und Ordnung sorgen"))
+                    .await;
+
+                info!(name = %ready.user.name, "Bot is connected!");
+
+                Ok(data)
             })
         })
         .options(poise::FrameworkOptions {
-            commands: vec![handler::lawsuit(), handler::prison()],
+            commands: vec![handler::lawsuit(), handler::prison(), hello()],
             on_error: |err| Box::pin(async { handler::error_handler(err).await }),
             listener: |ctx, event, ctx2, data| {
                 Box::pin(async move { handler::listener(ctx, event, ctx2, data).await })
             },
+            pre_command: |ctx| {
+                Box::pin(async move {
+                    let channel_name = ctx
+                        .channel_id()
+                        .name(&ctx.discord())
+                        .await
+                        .unwrap_or_else(|| "<unknown>".to_owned());
+                    let author = ctx.author().tag();
+
+                    match ctx {
+                        Context::Application(ctx) => {
+                            let command_name = &ctx.interaction.data().name;
+
+                            info!(?author, ?channel_name, ?command_name, "Command called");
+                        }
+                        Context::Prefix(_) => {
+                            tracing::warn!("Prefix command called!");
+                            // we don't use prefix commands
+                        }
+                    }
+                })
+            },
             ..Default::default()
         })
-        .intents(serenity::GatewayIntents::GUILD_MEMBERS)
+        .intents(GatewayIntents::non_privileged() | GatewayIntents::GUILD_MEMBERS)
         .run()
         .await
         .wrap_err("failed to create discord client")?;
+    Ok(())
+}
+
+/// Sag Karin hallo.
+#[poise::command(slash_command)]
+async fn hello(ctx: Context<'_>) -> Result<()> {
+    ctx.say("hoi!").await?;
     Ok(())
 }

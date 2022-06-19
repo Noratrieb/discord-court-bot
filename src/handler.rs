@@ -431,14 +431,12 @@ pub async fn listener(
     _: poise::FrameworkContext<'_, Handler, Report>,
     data: &Handler,
 ) -> Result<()> {
+    #[allow(clippy::single_match)]
     match event {
         Event::GuildMemberAddition { new_member } => {
-            if let Err(err) = data.handle_guild_member_join(ctx, &new_member).await {
+            if let Err(err) = data.handle_guild_member_join(ctx, new_member).await {
                 error!(?err, "An error occurred in guild_member_addition handler");
             }
-        }
-        Event::Ready { data_about_bot } => {
-            info!(name = %data_about_bot.user.name, "Bot is connected!");
         }
         _ => {}
     }
