@@ -16,7 +16,7 @@ COPY src ./src
 RUN touch src/main.rs
 RUN cargo build --release -Zsparse-registry
 
-FROM debian:11.3
+FROM debian:latest
 
 WORKDIR /app
 
