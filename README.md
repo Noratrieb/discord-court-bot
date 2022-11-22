@@ -1,5 +1,5 @@
 # discord-court-bot
-a very funny discord bot
+a very funny discord bot called Karin
 
 
 .env
