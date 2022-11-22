@@ -19,3 +19,5 @@ run mongodb
 ```shell
 docker compose up
 ```
+uwu owo
+```
